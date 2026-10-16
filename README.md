@@ -18,6 +18,8 @@ The original reference video is not included in the site. Sites identity and sta
 
 The fullscreen viewer starts with controls closed. Open Controls for layer and playback settings, or use the floating camera presets. Tour cycles through the three views; dragging the camera or choosing a preset stops it.
 
+The Cell view zooms out to the whole bacterium at true scale: an E. coli-like rod about 2.2 µm long, cut open mid-division. It shows its flagellar bundle (which splays apart when the cell tumbles), pili, two separating chromosomes, ribosome-rich cytoplasm, a treadmilling FtsZ division ring and pole-to-pole Min oscillation. The detailed molecular window sits at its top pole.
+
 Every structure carries an annotation pin. Select a pin, or pick a structure in Controls → Field guide, to see what it does, how this model simplifies it, and its literature sources (DOI links checked against Crossref, defined in dist/annotations.js). The flagellar filament places flagellin subunits on the measured one-start helix and rotates as a supercoiled helix with the motor. The hook is a woven, flared sleeve, and the stators are spinning MotA pentamers.
 
 Revision 6 adds film-style lighting: motion blur on spinning parts, depth of field, ambient occlusion, contact shadows and a color grade. Performance quality turns the extras off. The scene now shows live processes. The motor switches between runs and tumbles when CheY-P docks (the status pill at the top reports each switch, and Controls can turn it off). Ribosomes translate mRNA into growing protein chains, ATP synthase rotors spin, and efflux pumps expel drugs. The envelope shows bilayer tails, a woven cell wall, dense LPS and a periplasmic proton pool.

@@ -27,3 +27,15 @@
   - Three polysomes show mRNA sliding through ribosomes while nascent chains grow and release.
   - Large assemblies reserve packing space before the crowd fills in, and a dim backdrop wall replaces black gaps.
 - Events: automatic chemotaxis run/tumble switching with eased rotor speed, a status pill, and a toggle; the idle camera drifts slowly while playing. Field guide: 31 entries and 33 Crossref-checked citations.
+
+2026-10-15: Whole-cell revision 7.
+- Envelope geometry: the slab's layers are now concentric spheres around (0,-35,0) (`surf`/`surfY`). This lets the detailed window sit at the top pole of a true-scale E. coli-like capsule: radius 40, caps centred at y=-35 and y=-175, and a 3.5-unit division pinch at y=-105.
+- Coarse whole-cell layer, one sphere per macromolecule:
+  - Lathed envelope shells with a hole where the window sits.
+  - A section rim (kind 16) that follows the cutaway plane.
+  - LPS tufts and type 1 pili as swaying hairs (kind 15).
+  - Two segregating random-walk nucleoids, ribosomes excluded from them, and a protein crowd in a band behind the cut.
+  - A treadmilling FtsZ ring (kind 18) seen through a clear midcell slot, and pole-to-pole MinD oscillation (kind 19).
+  - Six peritrichous flagella wrapping into a rotating helical bundle that splays during tumbles (kind 17, `uTumble`).
+- Rendering: camera far is 1600. Fog, ambient occlusion and contact-shadow scales follow orbit distance. Level of detail is reciprocal: the window thins to a third when the camera is more than 150 units away, and the coarse layer thins when close.
+- Navigation and labels: camera flights interpolate distance in log space for large scale changes. A Cell view is added, and the tour is motor → envelope → interior → cell. Labels are scale-aware (whole-cell pins only when the orbit distance is over 110). The field guide has 38 entries and 41 Crossref-checked citations.
