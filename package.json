@@ -1,0 +1,1 @@
+{"name":"micro-molecular-lab","version":"1.0.0","private":true,"type":"module","scripts":{"check":"node --check dist/app.js","start":"python -m http.server 8080 --directory dist"}}

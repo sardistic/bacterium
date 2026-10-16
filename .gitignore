@@ -1,0 +1,5 @@
+docs/agent/HANDOFF.md
+.agent/runtime/
+node_modules/
+.sites-runtime/
+*.tar.gz
