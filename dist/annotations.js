@@ -47,6 +47,9 @@ export const CITES = {
   blattner1997: { text: 'Blattner FR, et al. The complete genome sequence of Escherichia coli K-12. Science. 1997;277:1453–1462.', url: doi('10.1126/science.277.5331.1453') },
   milo2013: { text: 'Milo R. What is the total number of protein molecules per cell volume? BioEssays. 2013;35:1050–1055.', url: doi('10.1002/bies.201300066') },
   bremer2008: { text: 'Bremer H, Dennis PP. Modulation of chemical composition and other parameters of the cell at different exponential growth rates. EcoSal Plus. 2008;3.', url: doi('10.1128/ecosal.5.2.3') },
+  howard2001: { text: 'Howard M, Rutenberg AD, de Vet S. Dynamic compartmentalization of bacteria: accurate division in E. coli. Phys Rev Lett. 2001;87:278102.', url: doi('10.1103/PhysRevLett.87.278102') },
+  cluzel2000: { text: 'Cluzel P, Surette M, Leibler S. An ultrasensitive bacterial motor revealed by monitoring signaling proteins in single cells. Science. 2000;287:1652–1655.', url: doi('10.1126/science.287.5458.1652') },
+  elowitz1999: { text: 'Elowitz MB, et al. Protein mobility in the cytoplasm of Escherichia coli. J Bacteriol. 1999;181:197–203.', url: doi('10.1128/JB.181.1.197-203.1999') },
   milo2010: { text: 'Milo R, et al. BioNumbers—the database of key numbers in molecular and cell biology. Nucleic Acids Res. 2010;38:D750–D753.', url: doi('10.1093/nar/gkp889') }
 };
 
@@ -59,14 +62,15 @@ export const FACTS = [
   { value: '~20–25 min', text: 'fastest doubling time in rich medium.', cite: 'bremer2008' },
   { value: '1–3 µm', text: 'typical cell length, under 1 µm wide.', cite: 'taheri2015' },
   { value: '~100 Hz', text: 'flagellar rotation while swimming; around a thousand protons per turn.', cite: 'berg2003' },
-  { value: '~1 s · 0.1 s', text: 'typical run and tumble durations during chemotaxis.', cite: 'bergbrown1972' }
+  { value: '~1 s · 0.1 s', text: 'typical run and tumble durations during chemotaxis.', cite: 'bergbrown1972' },
+  { value: '~7.7 µm²/s', text: 'diffusion of GFP in the cytoplasm; it crosses the cell in well under a second.', cite: 'elowitz1999' }
 ];
 
 export const ENTRIES = [
   { id: 'wholecell', group: 'cell', layer: 'envelope', scale: 'cell', name: 'The whole cell', kicker: 'E. coli-like rod · ~2.2 µm × 0.8 µm', dist: 560,
     what: 'Most E. coli cells are rods 1–3 µm long and under 1 µm wide. They grow in length and divide in the middle, so a cell roughly doubles its size before splitting in two.',
-    model: 'Drawn at true scale, about 10 nm per unit. The window at the top pole is the detailed region the other views zoom into. Elsewhere each sphere stands for a whole macromolecule.',
-    cites: ['taheri2015', 'silhavy2010'] },
+    model: 'Drawn at true scale, about 10 nm per unit. The window at the top pole is the detailed region. Elsewhere, about 60,000 molecules are each drawn from a down-sampled protein structure and move by simulated Brownian motion. Their diffusion coefficients scale from the measured value for GFP (about 7.7 µm²/s), slowed about two-million-fold so the motion is visible. Crowding enters through these measured rates; molecules do not collide.',
+    cites: ['taheri2015', 'silhavy2010', 'elowitz1999'] },
   { id: 'bundle', group: 'cell', layer: 'motor', scale: 'cell', name: 'Flagellar bundle', kicker: 'several flagella turning together', dist: 300,
     what: 'An E. coli cell has several flagella spread over its surface. When their motors turn counterclockwise, the filaments wrap into one bundle that trails behind and drives the cell forward: a run. When motors switch clockwise, those filaments change shape and fly out of the bundle, and the cell tumbles to a new heading.',
     model: 'Six flagella wrap over the pole into a rotating helical bundle that splays apart during each tumble (watch the status pill). Real filaments are 5–10 µm long, longer than shown.',
@@ -81,7 +85,7 @@ export const ENTRIES = [
     cites: ['nielsen2006', 'dillon2010'] },
   { id: 'ribosomezone', group: 'cell', layer: 'proteins', scale: 'cell', name: 'Ribosome-rich cytoplasm', kicker: 'ribosomes gather outside the nucleoids', dist: 150,
     what: 'Ribosomes are largely kept out of the dense nucleoids, so they collect toward the poles, the midcell and the membrane, where most translation happens.',
-    model: 'Each purple-and-pink pair is one 70S ribosome at true size.',
+    model: 'Each purple-and-pink pair is one 70S ribosome at true size. They diffuse at about 0.04 µm²/s, the slow rate measured for ribosomes engaged in translation, and the simulation keeps them out of the nucleoids.',
     cites: ['bakshi2012'] },
   { id: 'zring', group: 'cell', layer: 'proteins', scale: 'cell', name: 'Z ring (FtsZ)', kicker: 'division ring · treadmilling filaments', dist: 150,
     what: 'FtsZ, a bacterial relative of tubulin, assembles a ring of short filaments at midcell under the inner membrane. The filaments treadmill around the ring, and that motion guides the enzymes that build the new cell wall of the dividing septum.',
@@ -89,8 +93,8 @@ export const ENTRIES = [
     cites: ['bisson2017', 'yang2017'] },
   { id: 'min', group: 'cell', layer: 'proteins', scale: 'cell', name: 'Min oscillation', kicker: 'MinD/MinE pole-to-pole waves', dist: 170,
     what: 'MinD coats the inner membrane at one pole until MinE drives it off, and it reassembles at the opposite pole, over and over. Averaged over time, the division inhibitor it carries is lowest at midcell, so the Z ring forms in the middle.',
-    model: 'Cyan dots on the inner membrane gather at alternating poles. The period is stylized.',
-    cites: ['raskin1999'] },
+    model: 'Simulated live with the reaction–diffusion model of Howard, Rutenberg and de Vet using their published parameters and densities, solved along the cell axis. Cyan MinD and pink MinE dots light up wherever the model puts them on the membrane. The model’s period of about 104 s is shown about 3.5× faster; Controls → Live simulation plots the profiles.',
+    cites: ['raskin1999', 'howard2001'] },
   { id: 'filament', group: 'motor', name: 'Flagellar filament', kicker: 'FliC flagellin · ~20 nm wide · up to ~10 µm long', dist: 16,
     what: 'The propeller. Tens of thousands of flagellin subunits stack into 11 protofilaments around a hollow channel. The filament is a rigid, supercoiled helix. When the motor turns it, the helix spins like a corkscrew, and the wave you see travelling outward pushes the cell forward.',
     model: 'Subunits follow the measured one-start helix: about 5.5 subunits per turn and a 0.47 nm rise. Each subunit is drawn as an inner core plus an outer knob, which forms the diagonal grooves. Length, wave amplitude and speed are compressed so you can watch them.',
@@ -113,8 +117,8 @@ export const ENTRIES = [
     cites: ['johnson2021', 'tan2021'] },
   { id: 'cring', group: 'motor', name: 'C ring (switch complex)', kicker: 'FliG · FliM · FliN · ~45 nm across', dist: 9,
     what: 'The cytoplasmic rotor. Stator units push on FliG around its rim to make torque. When the signaling protein CheY-P binds FliM, the ring changes shape and the motor switches from counterclockwise to clockwise. The cell then tumbles and changes direction.',
-    model: 'Every several seconds a tumble briefly flips the rotor. The status pill at the top of the screen reports each switch. Turn it off under Controls → Chemotaxis switching, or use Reverse motor. Real runs last about a second and tumbles about a tenth of a second; both are slowed here.',
-    cites: ['carroll2020', 'tan2021', 'welch1993', 'bergbrown1972'] },
+    model: 'Switching is simulated: CheY-P fluctuates around a set point, and the chance of turning clockwise follows the very steep Hill curve Cluzel and colleagues measured (Hill coefficient about 10, half-point about 3.1 µM). Each tumble briefly flips the rotor. The status pill at the top of the screen reports each switch. Turn it off under Controls → Chemotaxis switching, or use Reverse motor. Real runs last about a second and tumbles about a tenth of a second; both are slowed here.',
+    cites: ['carroll2020', 'tan2021', 'welch1993', 'bergbrown1972', 'cluzel2000'] },
   { id: 'stators', group: 'motor', name: 'Stator units', kicker: 'MotA₅MotB₂ · proton-driven engines', dist: 8,
     what: 'About 11 stator units ring the rotor. In each one, protons flowing into the cell turn a ring of five MotA subunits around a MotB pair. MotA meshes with FliG on the C ring and drives it, like a small gear turning a large one.',
     model: 'Each pink unit is five MotA lumps that turn against the rotor and pulse with each power stroke.',

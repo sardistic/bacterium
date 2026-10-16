@@ -53,3 +53,13 @@
   - A "By the numbers" panel of 7 cited facts.
   - Headings follow the flown-to structure.
 - Field guide: 41 entries and 47 Crossref-checked citations.
+
+2026-10-16: Revision 9 (live models, shaped whole-cell molecules, cinematic camera).
+- New `dist/sim.js` with three models:
+  - `MinSim`: the Howard, Rutenberg & de Vet (2001) 1D Min reaction–diffusion model with the published parameters and densities. Verified offline before porting: period about 104 s, and time-averaged total MinD at midcell 0.53× the pole value, matching the paper's midcell minimum. It runs 3.5× faster than display time and is written to row 255 of a float texture that drives MinD/MinE bead visibility.
+  - `ChemotaxisSim`: CheY-P as an Ornstein–Uhlenbeck process; the clockwise bias follows the Cluzel et al. (2000) Hill curve (H 10.3, K 3.1 µM) through two-state switching. Tumbles are suppressed for the first 12 s.
+  - `BrownianSim`: about 62,000 whole-cell molecules on the CPU. Diffusion comes from Elowitz (GFP 7.7 µm²/s, Stokes–Einstein scaled) and Bakshi (ribosomes 0.04 µm²/s), slowed 2×10⁶. Confinement covers the cell, band, slot, window and nucleoid exclusion for ribosomes; there are no collisions. Positions are stored in a 256×256 RGBA32F texture read by bead kind 24.
+- Whole-cell molecules are down-sampled PDB surfaces with 12–18 beads each, which brings the coarse layer to about 1.17M beads.
+- Camera flights now use a slerped direction, log-distance with an arc, smootherstep easing, and a duration set by scale change and travel. Entry flights bias toward the open side of the cut. Tour holds add an eased slow orbit and dolly; each stop lasts 11 s.
+- Live charts in the panel show the Min membrane profiles and the CheY-P trace with tumble bands. Their palette was validated with the dataviz validator against #0b1519.
+- Fixed a pre-existing negative frame delta on the first animation frame, which turned the new noise terms into NaN.

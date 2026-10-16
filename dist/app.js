@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { MolecularSoundscape } from './soundscape.js?v=4';
-import { ENTRIES, CITES, GROUPS, FACTS } from './annotations.js?v=8';
+import { ENTRIES, CITES, GROUPS, FACTS } from './annotations.js?v=9';
+import { MinSim, ChemotaxisSim, BrownianSim } from './sim.js?v=9';
 
 const $ = id => document.getElementById(id);
 const state = { paused: matchMedia('(prefers-reduced-motion: reduce)').matches, speed: 1, direction: 1, time: 0, cut: 65, ao: true, labels: true, view: 'motor', quality: 'balanced', tour: false, selected: null, autoSwitch: true };
@@ -35,6 +36,11 @@ async function start() {
   scene.add(proteins, envelope, motor, particles,suspension);
   const sound=new MolecularSoundscape();window.__micro.sound=sound;
   const cutUniform = { value: 2.1 }, timeUniform = { value: 0 },heightUniform={value:innerHeight},rotorUniform={value:0},shutterUniform={value:0},tumbleUniform={value:0},fogUniform={value:new THREE.Vector2(24,64)};
+  // Live models: Brownian dynamics for whole-cell molecules (rows 0-254 of a float texture), the Min profile (row 255).
+  const brownian=new BrownianSim(255*256),minSim=new MinSim(),chemo=new ChemotaxisSim();
+  const simTexture=new THREE.DataTexture(brownian.data,256,256,THREE.RGBAFormat,THREE.FloatType);simTexture.minFilter=simTexture.magFilter=THREE.NearestFilter;simTexture.needsUpdate=true;
+  const simUniform={value:simTexture};
+  window.__micro.sims={brownian,minSim,chemo};
   const materials = [], animated = [], beadMeshes = [];
   let seed = 8711;
   const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
@@ -78,6 +84,7 @@ async function start() {
     attribute vec3 aCenter, aOffset, aColor;
     attribute float aRadius, aSeed, aShade, aMicroId;
     uniform float uTime,uRadiusScale,uMicroDetail,uMotionKind,uCssHeight,uRotor,uShutter,uTumble,uCut;
+    uniform highp sampler2D uSim;
     varying vec3 vCenter, vColor, vWorldCenter;
     varying vec2 vUv, vVel;
     varying float vRadius, vShade, vAnchorZ,vDust;
@@ -192,9 +199,15 @@ async function start() {
         float dir=fract(p)>.5?1.:-1.,a=aCenter.x+aOffset.x+uTime*.09*dir,r=aCenter.z+aOffset.z;
         centerPos=vec3(cos(a)*r,-105.+aCenter.y+aOffset.y,sin(a)*r);off=vec3(0.);drift=vec3(0.);
       }
-      // Min oscillation: membrane-bound MinD gathers at one pole, then the other; midcell sees it least.
+      // Min proteins: visibility follows the live reaction-diffusion profile (row 255 of the simulation texture).
       if(uMotionKind>18.5&&uMotionKind<19.5){
-        float s=.5+.5*cos(uTime*.21)*clamp((aCenter.y+105.)/70.,-1.,1.);life=smoothstep(.55,.92,s);drift*=.3;
+        float u=clamp((5.-aCenter.y)/220.,0.,.9999)*100.;vec4 m=texelFetch(uSim,ivec2(int(u),255),0);
+        life=smoothstep(.12,.55,aOffset.x>.5?m.g:m.r);off=vec3(0.);drift*=.3;
+      }
+      // Whole-cell molecules: positions and spin come from the Brownian-dynamics texture; offsets shape each molecule.
+      if(uMotionKind>23.5&&uMotionKind<24.5){
+        float idx=aCenter.x;vec4 sp=texelFetch(uSim,ivec2(int(mod(idx,256.)),int(floor(idx/256.))),0);
+        centerPos=sp.xyz;off=rotY(subOff,sp.w);drift=vec3(0.);
       }
       // Small molecules diffuse faster and farther than proteins: a long wander plus a quick tremor.
       if(uMotionKind>19.5&&uMotionKind<20.5){drift=wander(p,uTime*.85+p)*.95+wander(p+7.,uTime*3.2)*.12;}
@@ -279,7 +292,7 @@ async function start() {
         geo.setAttribute(name,new THREE.InstancedBufferAttribute(data,size));
       }
       geo.instanceCount=this.r.length;
-      const mat=new THREE.ShaderMaterial({vertexShader:beadVertex,fragmentShader:beadFragment,transparent:motionKind===8,depthWrite:motionKind!==8,uniforms:{uTime:timeUniform,uCut:cutUniform,uRadiusScale:{value:1},uMicroDetail:{value:this.detail?1:0},uMotionKind:{value:motionKind},uCssHeight:heightUniform,uRotor:rotorUniform,uShutter:shutterUniform,uTumble:tumbleUniform,uFog:fogUniform}});
+      const mat=new THREE.ShaderMaterial({vertexShader:beadVertex,fragmentShader:beadFragment,transparent:motionKind===8,depthWrite:motionKind!==8,uniforms:{uTime:timeUniform,uCut:cutUniform,uRadiusScale:{value:1},uMicroDetail:{value:this.detail?1:0},uMotionKind:{value:motionKind},uCssHeight:heightUniform,uRotor:rotorUniform,uShutter:shutterUniform,uTumble:tumbleUniform,uFog:fogUniform,uSim:simUniform}});
       const mesh=new THREE.Mesh(geo,mat);mesh.frustumCulled=false;mesh.userData.fullCount=this.r.length;mesh.userData.detail=this.detail;beadMeshes.push(mesh);parent.add(mesh);materials.push(mat);metrics.sphereCount+=this.r.length;return mesh;
     }
   }
@@ -675,16 +688,25 @@ async function start() {
     }
   }
   macroDNA.build(proteins,11);
+  // Each whole-cell molecule is a down-sampled PDB surface (12-18 beads) placed by the Brownian simulation.
   const macroRibosomes=new Beads(true),macroCrowd=new Beads();
-  for(let i=0;i<3600;i++){const x=range(-36,36),y=range(-214,-10),z=range(-10,5.5);if(!innerRoom(x,y,z,1.4)||inSlab(x,y,z)||inZSlot(y)||inNucleoid(x,y,z,.95))continue;const phase=range(0,60);macroRibosomes.add([x,y,z],[0,0,0],range(.95,1.1),['#9a4fb5','#b061c4','#8b45a8'][i%3],phase);macroRibosomes.add([x,y,z],[.75,.45,.2],range(.68,.78),'#d58bd8',phase);}
-  for(let i=0;i<120000;i++){const x=range(-36,36),y=range(-214,-10),z=range(-10,5.5);if(!innerRoom(x,y,z,.6)||inSlab(x,y,z)||inZSlot(y)||(inNucleoid(x,y,z)&&random()<.7))continue;macroCrowd.add([x,y,z],[0,0,0],range(.42,.8),palette[Math.floor(random()*palette.length)],range(0,80),range(.8,1));}
-  macroRibosomes.build(proteins);macroCrowd.build(proteins);
+  function shapedMolecule(batch,index,radius,template,k,color,shift=[0,0,0]){
+    const atoms=templates[template].atoms,n=atoms.length/5,step=n/k,fill=Math.cbrt(n/k)*.82,q=new THREE.Quaternion().setFromEuler(new THREE.Euler(range(0,6.28),range(0,6.28),range(0,6.28))),v=new THREE.Vector3();
+    for(let j=0;j<k;j++){const a=Math.floor(j*step)*5;v.set(atoms[a],atoms[a+1],atoms[a+2]).applyQuaternion(q);batch.add([index,0,0],[shift[0]+v.x*radius*1.6,shift[1]+v.y*radius*1.6,shift[2]+v.z*radius*1.6],atoms[a+3]*radius*1.52*fill,color,-1,.66+.34*atoms[a+4]);}
+  }
+  const cellAllowed=(x,y,z,kind)=>z>-10&&z<5.5&&!inZSlot(y)&&!inSlab(x,y,z)&&(kind?innerRoom(x,y,z,1.4)&&!inNucleoid(x,y,z,.95):innerRoom(x,y,z,.6));
+  for(let i=0;i<3600;i++){const x=range(-36,36),y=range(-214,-10),z=range(-10,5.5);if(!cellAllowed(x,y,z,1))continue;
+    const id=brownian.add(x,y,z,.04,1),hue=['#9a4fb5','#b061c4','#8b45a8'][i%3];shapedMolecule(macroRibosomes,id,.95,3,18,hue);shapedMolecule(macroRibosomes,id,.62,2,12,'#d58bd8',[.8,.45,.2]);}
+  for(let i=0;i<150000&&brownian.count<62000;i++){const x=range(-36,36),y=range(-214,-10),z=range(-10,5.5);if(!cellAllowed(x,y,z,0)||(inNucleoid(x,y,z)&&random()<.7))continue;
+    const r=range(.42,.82),id=brownian.add(x,y,z,7.7*2.4/(r*12),0);shapedMolecule(macroCrowd,id,r,r>.68?2:random()<.55?0:1,r>.68?16:12,palette[Math.floor(random()*palette.length)]);}
+  simTexture.needsUpdate=true;metrics.simulatedMolecules=brownian.count;
+  macroRibosomes.build(proteins,24);macroCrowd.build(proteins,24);
 
   // Division: the FtsZ ring treadmills around the pinched waist (kind 18); MinD oscillates between the poles (kind 19).
   const zRing=new Beads(),minD=new Beads();
   for(let f=0;f<80;f++){const a0=range(0,6.283),dy=range(-1.6,1.6),dr=range(-.4,.3),dir=f%2?.75:.25;for(let k=0;k<12;k++)zRing.add([a0,dy,32.4],[k*.016,range(-.08,.08),dr],range(.42,.5),k%3?'#ff8a3d':'#ff6f2b',f+dir);}
   zRing.build(proteins,18);
-  for(let i=0;i<15000;i++){const p=randomSurface(36.05);if(p[2]>6||inSlab(...p))continue;minD.add(p,[0,0,0],range(.3,.4),i%3?'#41d3ff':'#7ae4ff');}
+  for(let i=0;i<24000;i++){const p=randomSurface(36.05),isE=i%3===0;if(p[2]>6||inSlab(...p))continue;minD.add(p,[isE?1:0,0,0],range(.3,.4),isE?'#ff7aa8':i%2?'#41d3ff':'#7ae4ff');}
   minD.build(proteins,19);
 
   // Peritrichous flagella: each wraps over the body and pole into one helical bundle trailing above the cell (kind 17).
@@ -884,7 +906,7 @@ async function start() {
     card.hidden=false;document.body.classList.add('annot-open');
     for(const b of document.querySelectorAll('[data-guide]'))b.setAttribute('aria-current',String(b.dataset.guide===id));
     if(fly){
-      if(!keepTour)stopTour();document.querySelector('h1').textContent=entry.name;document.querySelector('.scene-heading p').textContent=entry.kicker;const anchor=anchorOf(entry,new THREE.Vector3()),dir=camera.position.clone().sub(controls.target).normalize();
+      if(!keepTour)stopTour();document.querySelector('h1').textContent=entry.name;document.querySelector('.scene-heading p').textContent=entry.kicker;const anchor=anchorOf(entry,new THREE.Vector3()),dir=camera.position.clone().sub(controls.target).normalize().lerp(new THREE.Vector3(.32,.24,1).normalize(),.55).normalize();
       transition={from:camera.position.clone(),targetFrom:controls.target.clone(),to:anchor.clone().addScaledVector(dir,entry.dist??8),targetTo:anchor,t:0};
       if(innerWidth<=760&&!document.body.classList.contains('panel-hidden'))togglePanel();
     }
@@ -923,10 +945,10 @@ async function start() {
   renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();fail(new Error('The graphics context was interrupted. Reload to rebuild the scene, or try Performance quality.'));});
   renderer.domElement.addEventListener('webglcontextrestored',()=>location.reload());
   const slabCenter=new THREE.Vector3(0,-4,-4);
-  let last=performance.now(),sample=last,frameCount=0,angle=0,omega=1.65,nextSwitch=12,tumbleUntil=-1,interacting=false,lastInteraction=performance.now(),idleClock=0;
-  controls.addEventListener('start',()=>{interacting=true;});controls.addEventListener('end',()=>{interacting=false;lastInteraction=performance.now();});
+  let last=performance.now(),sample=last,frameCount=0,angle=0,omega=1.65,nextSwitch=12,tumbleUntil=-1,tumbleStart=0,holdClock=0,interacting=false,lastInteraction=performance.now(),idleClock=0;
+  controls.addEventListener('start',()=>{interacting=true;holdClock=0;});controls.addEventListener('end',()=>{interacting=false;lastInteraction=performance.now();});
   function setTumble(on){
-    tumbleUntil=on?state.time+1.7:-1;if(!on)nextSwitch=state.time+7+Math.random()*8;
+    tumbleUntil=on?1e9:-1;tumbleStart=state.time;chemo.cw=on;
     const cw=(state.direction*(on?-1:1))<0;metrics.tumbles=(metrics.tumbles||0)+(on?1:0);
     $('motor-state').classList.toggle('tumble',on);
     $('motor-state-text').textContent=on?'Tumble · CheY-P switched the motor '+(cw?'clockwise':'counterclockwise'):'Run · motor turning '+(cw?'clockwise':'counterclockwise');
@@ -934,32 +956,39 @@ async function start() {
   $('auto-switch').onchange=e=>{state.autoSwitch=e.target.checked;if(!state.autoSwitch&&tumbleUntil>0)setTumble(false);};
   $('motor-state').onclick=()=>openEntry('cring',false);
   function frame(now){
-    const dt=Math.min((now-last)/1000,.05);last=now;
+    // Animation timestamps can precede the clock captured at start-up; never step backwards.
+    const dt=Math.max(0,Math.min((now-last)/1000,.05));last=Math.max(last,now);
     const running=!state.paused&&!document.hidden;
     if(running){
       const simDt=dt*state.speed;state.time+=simDt;
       // Chemotaxis: CheY-P binding periodically flips the motor to clockwise for a brief tumble, then it returns to its run direction.
-      if(state.autoSwitch){if(tumbleUntil<0&&state.time>nextSwitch)setTumble(true);else if(tumbleUntil>0&&state.time>tumbleUntil)setTumble(false);}
+      chemo.step(simDt);
+      if(state.autoSwitch&&state.time>12){if(tumbleUntil<0&&chemo.wantsCW(simDt))setTumble(true);else if(tumbleUntil>0&&state.time-tumbleStart>.8&&chemo.wantsCCW(simDt))setTumble(false);}
+      // Min reaction-diffusion runs 3.5x faster than display time (model period ~104 s, seen as ~30 s).
+      minSim.advance(simDt*3.5);
+      {const row=255*256*4,dm=Math.max(...minSim.d),em=Math.max(...minSim.e);for(let b=0;b<100;b++){brownian.data[row+b*4]=minSim.d[b]/dm;brownian.data[row+b*4+1]=minSim.e[b]/em;}}
+      if(proteins.visible)brownian.step(simDt,cellAllowed);
+      simTexture.needsUpdate=true;
       const targetOmega=1.65*state.direction*(tumbleUntil>0?-1:1);omega+=(targetOmega-omega)*Math.min(1,simDt*8);angle+=omega*simDt;
-      if(state.tour){tourElapsed+=dt;if(pendingTourEntry&&!transition){const stop=pendingTourEntry;pendingTourEntry=null;openEntry(stop.entry,!stop.view,true);}if(tourElapsed>9.5){tourElapsed=0;tourIndex=(tourIndex+1)%tourStops.length;goTourStop(tourIndex);}}
+      if(state.tour){tourElapsed+=dt;if(pendingTourEntry&&!transition){const stop=pendingTourEntry;pendingTourEntry=null;openEntry(stop.entry,!stop.view,true);}if(tourElapsed>11){tourElapsed=0;tourIndex=(tourIndex+1)%tourStops.length;goTourStop(tourIndex);}}
       // Idle camera breathes slowly around the target, like the reference's drifting shot.
-      if(!interacting&&!transition&&!state.tour&&now-lastInteraction>6000){idleClock+=dt;camera.position.sub(controls.target).applyAxisAngle(camera.up,.045*Math.sin(idleClock*.13)*dt).add(controls.target);}
+      const tourHold=state.tour&&!transition;
+      if(!interacting&&!transition&&(tourHold||now-lastInteraction>6000)){holdClock+=dt;idleClock+=dt;const ramp=smoother(Math.min(1,holdClock/2.5)),yaw=(tourHold?.032:.045*Math.sin(idleClock*.13))*ramp*dt;camera.position.sub(controls.target).applyAxisAngle(camera.up,yaw).multiplyScalar(tourHold?1-.006*ramp*dt:1).add(controls.target);}
     }
     shutterUniform.value=running?omega*state.speed*.09:0;
     rotor.rotation.y=angle;rotorUniform.value=angle;timeUniform.value=state.time;
     for(let i=0;i<animated.length;i++){animated[i].rotation.y=state.time*(.6+i*.13);animated[i].rotation.z=Math.sin(state.time*1.2+i)*.12;}
     metrics.rotorAngle=angle;
     if(transition){
-      const d0=transition.from.distanceTo(transition.targetFrom),d1=transition.to.distanceTo(transition.targetTo),ratio=Math.max(d0,d1)/Math.max(Math.min(d0,d1),.01);
-      transition.t=Math.min(transition.t+dt/(ratio>4?2.6:1.1),1);const t=tEase(transition.t);
-      if(ratio>4){
-        // Zooming in: aim first, then dive. Zooming out: pull back first, then settle on the new target.
-        const aimT=tEase(Math.min(1,transition.t*(d1<d0?1.6:1))),dir0=transition.from.clone().sub(transition.targetFrom).normalize(),dir1=transition.to.clone().sub(transition.targetTo).normalize();
-        controls.target.lerpVectors(transition.targetFrom,transition.targetTo,aimT);
-        const dist=Math.exp(THREE.MathUtils.lerp(Math.log(d0),Math.log(d1),t));
-        camera.position.copy(controls.target).addScaledVector(dir0.lerp(dir1,t).normalize(),dist);
-      }else{camera.position.lerpVectors(transition.from,transition.to,t);controls.target.lerpVectors(transition.targetFrom,transition.targetTo,t);}
-      if(transition.t===1)transition=null;
+      const tr=transition;if(!tr.dur)prepareFlight(tr);
+      tr.t=Math.min(tr.t+dt/tr.dur,1);const e=smoother(tr.t);
+      // Zooming in: aim first, then dive. Zooming out: pull back first, then settle on the new target.
+      const aim=tr.d1<tr.d0/3?smoother(Math.min(1,tr.t*1.5)):tr.d0<tr.d1/3?smoother(Math.max(0,(tr.t-.25)/.75)):e;
+      controls.target.lerpVectors(tr.targetFrom,tr.targetTo,aim);
+      const dir=tr.dir0.clone().applyQuaternion(new THREE.Quaternion().slerp(tr.turn,e));
+      const dist=Math.exp(THREE.MathUtils.lerp(Math.log(tr.d0),Math.log(tr.d1),e))*(1+tr.arc*Math.sin(Math.PI*e));
+      camera.position.copy(controls.target).addScaledVector(dir,dist);
+      if(tr.t===1){transition=null;holdClock=0;}
     }
     controls.update();const focus=camera.position.distanceTo(controls.target);postMaterial.uniforms.uFocus.value=focus;fogUniform.value.set(focus*1.4+12,focus*3.6+46);
     const far=camera.position.distanceTo(slabCenter)>150;if(far!==lodFar){lodFar=far;resize();}
@@ -976,6 +1005,35 @@ async function start() {
     if(!metrics.ready){metrics.ready=true;$('loading').classList.add('hidden');$('render-status').textContent='MOLECULAR LANDSCAPE';}
   }
   function tEase(t){return t*(3-2*t);}
+  function smoother(t){return t*t*t*(t*(t*6-15)+10);}
+  function prepareFlight(tr){
+    tr.d0=tr.from.distanceTo(tr.targetFrom);tr.d1=tr.to.distanceTo(tr.targetTo);
+    tr.dir0=tr.from.clone().sub(tr.targetFrom).normalize();const dir1=tr.to.clone().sub(tr.targetTo).normalize();tr.turn=new THREE.Quaternion().setFromUnitVectors(tr.dir0,dir1);
+    const travel=tr.targetFrom.distanceTo(tr.targetTo),span=Math.max(tr.d0,tr.d1);
+    tr.arc=Math.min(.45,travel/(tr.d0+tr.d1)*.6);
+    tr.dur=THREE.MathUtils.clamp(1.5+.5*Math.abs(Math.log2(tr.d1/tr.d0))+.7*Math.min(travel/span,2.5),1.5,4.5);
+  }
+  // Live simulation charts (Min membrane profiles; CheY-P with tumble intervals), redrawn at ~8 Hz while the panel is open.
+  const chartColors={minD:'#1a9ccc',minE:'#d9507f',chey:'#5aa821',grid:'#ffffff14',muted:'#82958c',text:'#dbe5d4',band:'#ffffff16'};
+  const charts={min:$('chart-min'),chey:$('chart-chey')},hover={min:null,chey:null};
+  function sizeCanvas(c){const r=devicePixelRatio||1,w=c.clientWidth,h=c.clientHeight;if(c.width!==Math.round(w*r)){c.width=Math.round(w*r);c.height=Math.round(h*r);}const g=c.getContext('2d');g.setTransform(r,0,0,r,0,0);return [g,w,h];}
+  function drawCharts(){
+    if(document.body.classList.contains('panel-hidden'))return;
+    {const [g,w,h]=sizeCanvas(charts.min),pad=4;g.clearRect(0,0,w,h);g.strokeStyle=chartColors.grid;g.lineWidth=1;g.beginPath();g.moveTo(0,h-pad+.5);g.lineTo(w,h-pad+.5);g.moveTo(w/2+.5,0);g.lineTo(w/2+.5,h-pad);g.stroke();
+      const dm=Math.max(...minSim.d),em=Math.max(...minSim.e);
+      for(const [arr,max,color] of [[minSim.d,dm,chartColors.minD],[minSim.e,em,chartColors.minE]]){g.strokeStyle=color;g.lineWidth=2;g.lineJoin='round';g.beginPath();for(let i=0;i<arr.length;i++){const x=i/(arr.length-1)*w,y=h-pad-(arr[i]/max)*(h-pad*3);i?g.lineTo(x,y):g.moveTo(x,y);}g.stroke();}
+      if(hover.min!==null){const i=Math.round(hover.min*(minSim.n-1)),x=i/(minSim.n-1)*w;g.strokeStyle=chartColors.muted;g.lineWidth=1;g.beginPath();g.moveTo(x+.5,0);g.lineTo(x+.5,h-pad);g.stroke();$('chart-tip').textContent=(i/(minSim.n-1)*2.2).toFixed(2)+' µm from the top pole · MinD '+(minSim.d[i]/dm).toFixed(2)+' · MinE '+(minSim.e[i]/em).toFixed(2)+' of peak';}}
+    {const [g,w,h]=sizeCanvas(charts.chey),pad=4,lo=1.8,hi=3.8,hist=chemo.history,toY=v=>h-pad-(v-lo)/(hi-lo)*(h-pad*2),toX=i=>w-(hist.length-1-i)/599*w;g.clearRect(0,0,w,h);
+      g.fillStyle=chartColors.band;for(let i=0;i<hist.length;i++)if(hist[i][1])g.fillRect(toX(i)-w/1198,0,w/599+.5,h-pad);
+      g.strokeStyle=chartColors.grid;g.beginPath();g.moveTo(0,h-pad+.5);g.lineTo(w,h-pad+.5);g.stroke();
+      g.setLineDash([3,3]);g.strokeStyle=chartColors.muted;g.beginPath();g.moveTo(0,toY(chemo.k)+.5);g.lineTo(w,toY(chemo.k)+.5);g.stroke();g.setLineDash([]);
+      g.fillStyle=chartColors.muted;g.font='9px Inter,Segoe UI,sans-serif';g.fillText('K = 3.1 µM',4,toY(chemo.k)-4);
+      g.strokeStyle=chartColors.chey;g.lineWidth=2;g.beginPath();hist.forEach(([v],i)=>{const x=toX(i),y=toY(v);i?g.lineTo(x,y):g.moveTo(x,y);});g.stroke();
+      if(hover.chey!==null&&hist.length){const i=Math.max(0,Math.min(hist.length-1,Math.round(hist.length-1-(1-hover.chey)*599))),x=toX(i);g.strokeStyle=chartColors.muted;g.lineWidth=1;g.beginPath();g.moveTo(x+.5,0);g.lineTo(x+.5,h-pad);g.stroke();$('chart-tip').textContent=((hist.length-1-i)/10).toFixed(1)+' s ago · CheY-P '+hist[i][0].toFixed(2)+' µM · '+(hist[i][1]?'tumble (clockwise)':'run');}}
+    if(hover.min===null&&hover.chey===null)$('chart-tip').textContent='Hover a chart to read values.';
+  }
+  for(const [key,c] of Object.entries(charts)){c.addEventListener('pointermove',e=>{const r=c.getBoundingClientRect();hover[key]=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));drawCharts();});c.addEventListener('pointerleave',()=>{hover[key]=null;drawCharts();});}
+  setInterval(drawCharts,125);
   renderer.setAnimationLoop(frame);
   window.__micro.setView=setView;
   window.__micro.renderer=renderer;

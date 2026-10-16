@@ -52,3 +52,14 @@
 .facts a{color:#bcd497;text-decoration:none;border-bottom:1px solid #bcd49744;font-size:8.5px}
 .pin{transition:opacity .35s,visibility .35s,border-color .2s,background .2s,transform .12s linear}
 @media(max-width:760px){.scale-bar{bottom:118px;right:16px}}
+/* Live simulation charts. */
+.chart{margin:0 0 14px}
+.chart figcaption{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:4px 8px;margin-bottom:6px;font-size:10px;color:#dbe5d4}
+.chart figcaption strong{font-weight:500}
+.chart .legend{display:flex;align-items:center;gap:5px;font-size:8.5px;color:#82958c;white-space:nowrap}
+.chart .legend i{display:inline-block;width:10px;height:2px;border-radius:1px;background:var(--c);margin-left:6px}
+.chart .legend i.band{width:9px;height:9px;border-radius:2px;background:#ffffff26}
+.chart canvas{display:block;width:100%;height:84px;border-radius:5px;background:#0b1519;border:1px solid #ffffff0d;touch-action:none;cursor:crosshair}
+.chart-axis{display:flex;justify-content:space-between;margin-top:4px;font-size:7.5px;letter-spacing:.6px;color:#6f8077;text-transform:uppercase}
+.chart-tip{min-height:15px;margin:0 0 8px;font:9px Consolas,monospace;color:#b7c6a5}
+.sim-note{font-size:9px;line-height:1.6;color:#82958c;margin:0}
