@@ -41,10 +41,26 @@ export const CITES = {
   bisson2017: { text: 'Bisson-Filho AW, et al. Treadmilling by FtsZ filaments drives peptidoglycan synthesis and bacterial cell division. Science. 2017;355:739–743.', url: doi('10.1126/science.aak9973') },
   yang2017: { text: 'Yang X, et al. GTPase activity–coupled treadmilling of the bacterial tubulin FtsZ organizes septal cell wall synthesis. Science. 2017;355:744–747.', url: doi('10.1126/science.aak9995') },
   raskin1999: { text: 'Raskin DM, de Boer PAJ. Rapid pole-to-pole oscillation of a protein required for directing division to the middle of Escherichia coli. PNAS. 1999;96:4971–4976.', url: doi('10.1073/pnas.96.9.4971') },
+  kohler2017: { text: 'Kohler R, et al. Architecture of a transcribing-translating expressome. Science. 2017;356:194–197.', url: doi('10.1126/science.aal3059') },
+  xu1997: { text: 'Xu Z, Horwich AL, Sigler PB. The crystal structure of the asymmetric GroEL–GroES–(ADP)7 chaperonin complex. Nature. 1997;388:741–750.', url: doi('10.1038/41944') },
+  nissen1995: { text: 'Nissen P, et al. Crystal structure of the ternary complex of Phe-tRNAPhe, EF-Tu, and a GTP analog. Science. 1995;270:1464–1472.', url: doi('10.1126/science.270.5241.1464') },
+  blattner1997: { text: 'Blattner FR, et al. The complete genome sequence of Escherichia coli K-12. Science. 1997;277:1453–1462.', url: doi('10.1126/science.277.5331.1453') },
+  milo2013: { text: 'Milo R. What is the total number of protein molecules per cell volume? BioEssays. 2013;35:1050–1055.', url: doi('10.1002/bies.201300066') },
+  bremer2008: { text: 'Bremer H, Dennis PP. Modulation of chemical composition and other parameters of the cell at different exponential growth rates. EcoSal Plus. 2008;3.', url: doi('10.1128/ecosal.5.2.3') },
   milo2010: { text: 'Milo R, et al. BioNumbers—the database of key numbers in molecular and cell biology. Nucleic Acids Res. 2010;38:D750–D753.', url: doi('10.1093/nar/gkp889') }
 };
 
 export const GROUPS = { cell: 'Whole cell', motor: 'Flagellar motor', envelope: 'Cell envelope', proteins: 'Interior', particles: 'Moving particles', suspension: 'Artistic layers' };
+
+export const FACTS = [
+  { value: '4.6 Mb', text: 'chromosome, with about 4,300 protein-coding genes.', cite: 'blattner1997' },
+  { value: '~3 million', text: 'protein molecules in every cubic micrometre of cell.', cite: 'milo2013' },
+  { value: '7k–70k', text: 'ribosomes per cell, rising with growth rate.', cite: 'bremer2008' },
+  { value: '~20–25 min', text: 'fastest doubling time in rich medium.', cite: 'bremer2008' },
+  { value: '1–3 µm', text: 'typical cell length, under 1 µm wide.', cite: 'taheri2015' },
+  { value: '~100 Hz', text: 'flagellar rotation while swimming; around a thousand protons per turn.', cite: 'berg2003' },
+  { value: '~1 s · 0.1 s', text: 'typical run and tumble durations during chemotaxis.', cite: 'bergbrown1972' }
+];
 
 export const ENTRIES = [
   { id: 'wholecell', group: 'cell', layer: 'envelope', scale: 'cell', name: 'The whole cell', kicker: 'E. coli-like rod · ~2.2 µm × 0.8 µm', dist: 560,
@@ -163,6 +179,18 @@ export const ENTRIES = [
     what: 'A working copy of a gene. Ribosomes move along it from the 5′ to the 3′ end, one codon at a time.',
     model: 'The red strand slides steadily through each polysome.',
     cites: ['schuwirth2005', 'brandt2009'] },
+  { id: 'rnap', group: 'proteins', name: 'RNA polymerase', kicker: 'transcription coupled to translation', dist: 8,
+    what: 'RNA polymerase reads a gene on the DNA and spins out messenger RNA. In bacteria there is no nucleus to cross, so ribosomes start translating the mRNA while it is still being made. The leading ribosome can sit right against the polymerase as one machine, the expressome.',
+    model: 'A blue polymerase on a short stretch of DNA sits at the head of each polysome, where the red mRNA appears.',
+    cites: ['kohler2017', 'brandt2009'] },
+  { id: 'eftu', group: 'proteins', name: 'EF-Tu · tRNA deliveries', kicker: 'ternary complexes ferrying amino acids', dist: 8,
+    what: 'Each amino acid arrives at the ribosome on its own transfer RNA, carried by the elongation factor EF-Tu. When the tRNA matches the codon in the ribosome’s A site, EF-Tu hydrolyses GTP and lets go, and the amino acid joins the growing chain.',
+    model: 'Red L-shaped tRNAs (yellow tip: the amino acid) held by blue EF-Tu travel to a ribosome, dock, and release.',
+    cites: ['nissen1995', 'schuwirth2005'] },
+  { id: 'chaperonin', group: 'proteins', name: 'GroEL/GroES chaperonin', kicker: 'protein-folding chamber', dist: 7,
+    what: 'Two stacked rings of seven GroEL subunits form a barrel. A newly made protein that is struggling to fold slips inside, the GroES lid caps the chamber, and the protein gets a few seconds of shelter to fold before the lid lifts off and releases it.',
+    model: 'Green double ring with a yellow lid that caps the barrel, lifts away, and returns on a slowed cycle.',
+    cites: ['xu1997'] },
   { id: 'nascent', group: 'proteins', name: 'Nascent protein chains', kicker: 'polypeptides leaving the exit tunnel', dist: 8,
     what: 'A new protein emerges from the large subunit’s exit tunnel while it is still being made and starts folding. It is released when the ribosome reaches a stop codon. Bacterial ribosomes add roughly 10–20 amino acids per second.',
     model: 'Orange chains grow from each ribosome and disappear when released.',

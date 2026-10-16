@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { MolecularSoundscape } from './soundscape.js?v=4';
-import { ENTRIES, CITES, GROUPS } from './annotations.js?v=7';
+import { ENTRIES, CITES, GROUPS, FACTS } from './annotations.js?v=8';
 
 const $ = id => document.getElementById(id);
 const state = { paused: matchMedia('(prefers-reduced-motion: reduce)').matches, speed: 1, direction: 1, time: 0, cut: 65, ao: true, labels: true, view: 'motor', quality: 'balanced', tour: false, selected: null, autoSwitch: true };
@@ -83,6 +83,12 @@ async function start() {
     varying float vRadius, vShade, vAnchorZ,vDust;
     ${organicField}
     vec3 rotY(vec3 v,float a){float c=cos(a),s=sin(a);return vec3(c*v.x+s*v.z,v.y,-s*v.x+c*v.z);}
+    // Brownian-like wander: a Catmull-Rom curve through random keyframes, so speed and direction change irregularly.
+    vec3 hash3(float n){return fract(sin(vec3(n,n+1.7,n+3.1))*vec3(43758.5453,22578.1459,19642.349))*2.-1.;}
+    vec3 wander(float seed,float t){
+      float i=floor(t),f=fract(t),k=seed*17.31;vec3 a=hash3(k+i-1.),b=hash3(k+i),c=hash3(k+i+1.),d=hash3(k+i+2.);
+      return .5*(2.*b+(c-a)*f+(2.*a-5.*b+4.*c-d)*f*f+(3.*b-a-3.*c+d)*f*f*f);
+    }
     // Flagellar filament: sub holds (arc length, azimuth, radius) on the flagellin lattice; o is (radial, tangential, axial) inside one subunit.
     vec3 filamentPos(vec3 sub,vec3 o,float rot,float t){
       float sl=sub.x,phi=sub.y-rot,rr=sub.z*(1.+.02*sin(t*1.7+sl*2.3+sub.y*3.));
@@ -101,7 +107,7 @@ async function start() {
     void main(){
       float p=aSeed;
       float moving=step(0.,p),tm=uTime*(.65+fract(p*.173)*.65);
-      vec3 drift=(vec3(sin(tm*.91+p)+.35*sin(tm*2.7+p*3.),sin(tm*.73+p*1.3)+.3*cos(tm*2.3+p),cos(tm*.81+p)+.3*sin(tm*2.1+p*2.)))*moving*.17;
+      vec3 drift=moving*(wander(p,tm*.42+p)*.2+vec3(sin(tm*2.7+p*3.),cos(tm*2.3+p),sin(tm*2.1+p*2.))*.022);
       vec3 off=aOffset;
       if(uMicroDetail>.5){
         if(aMicroId>.5){float h=dot(aOffset,vec3(127.1,311.7,74.7))+aMicroId*13.47;vec3 mn=normalize(vec3(sin(h),sin(h*1.71+1.),cos(h*2.31)));off+=mn*aRadius*.65;}
@@ -117,7 +123,7 @@ async function start() {
       off.xy+=vec2(-off.y,off.x)*hinge;
       vec3 centerPos=aCenter;float life=1.,anchorZ=0.;
       if(uMotionKind>.5&&uMotionKind<1.5||uMotionKind>3.5&&uMotionKind<5.5)centerPos.y+=memWave(aCenter.xz,uTime);
-      if(uMotionKind>.5&&uMotionKind<1.5){float h=max(aCenter.y-surfY(aCenter.xz,5.1),0.);off.x+=sin(uTime*1.7+aCenter.x*.8+aCenter.z*.3)*h*.12;off.z+=cos(uTime*1.2+aCenter.x*.6)*h*.07;}
+      if(uMotionKind>.5&&uMotionKind<1.5){float h=max(aCenter.y-surfY(aCenter.xz,5.1),0.);float gust=1.+.9*smoothstep(.2,1.,sin(uTime*.33+aCenter.x*.11+aCenter.z*.07));off.x+=sin(uTime*1.7+aCenter.x*.8+aCenter.z*.3)*h*.12*gust;off.z+=cos(uTime*1.2+aCenter.x*.6)*h*.07*gust;}
       if(uMotionKind>1.5&&uMotionKind<2.5){float q=fract(uTime*.22+p*.071),r=2.55,y=-1.25;float a=floor(p)*2.39996;if(q<.55){float t=q/.55;r=mix(5.,2.55,t);y=mix(-5.,-1.25,t);a+=sin(t*3.14159)*.7;}else if(q>.75){float t=(q-.75)/.25;r=mix(2.55,5.,t);y=mix(-1.25,-5.,t);a-=sin(t*3.14159)*.7;}centerPos=vec3(2.1+cos(a)*r,y,.1+sin(a)*r);drift*=.12;}
       if(uMotionKind>2.5&&uMotionKind<3.5){float q=fract(uTime*(.38+fract(p)*.3)+p*.137);float a=floor(p)*.5712;centerPos=vec3(2.1+cos(a)*2.78,mix(3.6,-.6,q),.1+sin(a)*2.78);drift=vec3(sin(q*17.+p),0.,cos(q*13.+p))*.04;life=smoothstep(0.,.08,q)*(1.-smoothstep(.92,1.,q));}
       if(uMotionKind>3.5&&uMotionKind<4.5){off.y+=sin(uTime*2.2+aCenter.x*2.+aCenter.z*1.3)*.022;off.x+=sin(uTime*3.+aCenter.x*3.7+aCenter.z*2.9)*.012;}
@@ -189,6 +195,20 @@ async function start() {
       // Min oscillation: membrane-bound MinD gathers at one pole, then the other; midcell sees it least.
       if(uMotionKind>18.5&&uMotionKind<19.5){
         float s=.5+.5*cos(uTime*.21)*clamp((aCenter.y+105.)/70.,-1.,1.);life=smoothstep(.55,.92,s);drift*=.3;
+      }
+      // Small molecules diffuse faster and farther than proteins: a long wander plus a quick tremor.
+      if(uMotionKind>19.5&&uMotionKind<20.5){drift=wander(p,uTime*.85+p)*.95+wander(p+7.,uTime*3.2)*.12;}
+      // GroES lid: binds, caps the folding chamber, then lifts off and drifts away once per cycle.
+      if(uMotionKind>20.5&&uMotionKind<21.5){
+        float ph=fract(uTime/9.5+fract(aCenter.x*.173+aCenter.z*.311)),open=smoothstep(.5,.62,ph)*(1.-smoothstep(.88,.98,ph)),a=open*.75;
+        off.y+=open*1.25;off=vec3(off.x,cos(a)*off.y-sin(a)*off.z,sin(a)*off.y+cos(a)*off.z)+wander(aCenter.x,uTime*.6)*open*.4;life=1.-open*.8;
+      }
+      // EF-Tu carries an aminoacyl-tRNA to a ribosome, docks at the A site, then releases.
+      if(uMotionKind>21.5&&uMotionKind<22.5){
+        float q=fract(uTime*(.07+fract(p*.31)*.04)+fract(p*.57)),e=smoothstep(0.,.55,q);
+        vec3 dir=normalize(vec3(sin(p*12.9),.6*cos(p*7.3),sin(p*4.1+1.)));
+        centerPos=mix(aCenter+dir*5.5,aCenter+dir*1.15,e)+wander(p,uTime*.8)*(1.-e)*.8;
+        off=rotY(subOff,uTime*.4*(1.-e)+p);drift=vec3(0.);life=smoothstep(0.,.06,q)*(1.-smoothstep(.82,.92,q));
       }
       vec3 localPos=centerPos+off+drift,prevLocal;
       if(uMotionKind>5.5&&uMotionKind<7.5)localPos=organicShape(localPos,uTime);
@@ -326,7 +346,7 @@ async function start() {
   // Protons pumped out by respiration collect in the periplasm before flowing back through stators and ATP synthase.
   const periplasmProtons=new Beads();
   for(let i=0;i<700;i++){const x=range(-20,20),z=range(-11.5,3.8);periplasmProtons.add([x,surf(x,z,range(2.05,4.55)),z],[0,0,0],range(.028,.045),i%4?'#ff4fa8':'#ff7cc4',range(0,80));}
-  periplasmProtons.build(particles);
+  periplasmProtons.build(particles,20);
   // AcrAB-TolC efflux pumps span both membranes: AcrB in the inner membrane, AcrA adaptors across the periplasm, the TolC channel through the outer membrane.
   const pumps=new Beads(true),drugs=new Beads();
   for(const [x,z] of effluxSites){
@@ -420,7 +440,7 @@ async function start() {
   // Polysomes: mRNA slides through a string of ribosomes while each one extrudes a growing protein chain.
   const ribosomes=new Beads(true),mrna=new Beads(),nascent=new Beads(),polyPath=(o,d,u)=>{const perp=new THREE.Vector3().crossVectors(d,up).normalize();return new THREE.Vector3(...o).addScaledVector(d,u).addScaledVector(perp,Math.sin(u*.9+o[0])*.5).add(new THREE.Vector3(0,.35*Math.sin(u*.6+o[2]),0));};
   const polysomes=[[[-10.5,-4.2,-.6],[1,-.25,.3]],[[-4.5,-9.2,.4],[.8,.5,-.2]],[[6.2,-7.4,-.5],[-.5,-.2,-.84]]].map(([o,d])=>[o,new THREE.Vector3(...d).normalize()]);
-  const ribosomeSites=[];
+  const ribosomeSites=[],rnapSites=[],rnap=new Beads(true),rnapDNA=new Beads();
   for(const [o,d] of polysomes){
     const perp=new THREE.Vector3().crossVectors(d,up).normalize();
     for(let u=1.1;u<6.6;u+=1.75){
@@ -431,8 +451,27 @@ async function start() {
       for(let i=0;i<46;i++){step.copy(perp).multiplyScalar(-.06).add(new THREE.Vector3(range(-.05,.05),range(-.05,.05),range(-.05,.05)));walk.add(step);nascent.add(exit.toArray(),walk.toArray(),.042,i%6<3?'#ff9f5a':'#ffb877',-(1+i/46));}
     }
     for(let u=0;u<7;u+=.045)mrna.add(o,d.toArray(),.04,'#ff6f61',u);
+    // RNA polymerase sits where the mRNA begins, still reading a DNA template that threads through it.
+    const R0=polyPath(o,d,0),templ=new THREE.Vector3().crossVectors(d,perp).normalize();rnapSites.push(R0.toArray());
+    reserve(R0.x,R0.y,R0.z,.85);ball(rnap,R0.toArray(),[.62,.55,.6],'#3f8cff',250);ball(rnap,R0.clone().addScaledVector(perp,.35).toArray(),[.32,.3,.3],'#6fa8ff',65);
+    for(let t=-3.2;t<=3.2;t+=.05){const a=t*18.5,c=R0.clone().addScaledVector(templ,t);for(const [shift,color] of [[0,'#f3c63a'],[2.4,'#e9a637']])rnapDNA.add(R0.toArray(),[c.x-R0.x+(perp.x*Math.cos(a+shift)+d.x*Math.sin(a+shift))*.07,c.y-R0.y+(perp.y*Math.cos(a+shift)+d.y*Math.sin(a+shift))*.07,c.z-R0.z+(perp.z*Math.cos(a+shift)+d.z*Math.sin(a+shift))*.07],.036,color);}
   }
-  ribosomes.build(proteins);mrna.build(proteins,12);nascent.build(proteins,13);
+  ribosomes.build(proteins);mrna.build(proteins,12);nascent.build(proteins,13);rnap.build(proteins);rnapDNA.build(proteins,11);
+  // EF-Tu·tRNA ternary complexes: an L-shaped tRNA (red) held by EF-Tu (blue), two per ribosome.
+  const deliveries=new Beads(true);
+  ribosomeSites.forEach((site,i)=>{for(let k=0;k<2;k++){const seed=i*2+k+.41;
+    for(let j=0;j<9;j++){deliveries.add(site,[j*.07,0,0],.055,'#ff5d73',seed);deliveries.add(site,[0,j*.07,0],.055,j>6?'#ffd166':'#ff5d73',seed);}
+    ball(deliveries,[site[0]+.32,site[1]+.3,site[2]],[.22,.2,.2],'#6cc4ff',32,seed,site);}});
+  deliveries.build(particles,22);
+  // GroEL/GroES chaperonins: two stacked seven-member rings form a folding chamber; the GroES lid cycles on and off.
+  const groel=new Beads(true),groes=new Beads(true),chaperoninSites=[[-8,-8.5,.8],[9,-3.5,1.2],[-2,-6,-2.5]];
+  for(const [x,y,z] of chaperoninSites){
+    reserve(x,y,z,.9);reserve(x,y+.9,z,.6);
+    for(let ring=0;ring<2;ring++)for(let k=0;k<7;k++){const a=k*Math.PI*2/7+ring*.45;ball(groel,[x+Math.cos(a)*.45,y+(ring?.36:-.36),z+Math.sin(a)*.45],[.2,.3,.2],(k+ring)%2?'#7fe0a8':'#5cc98f',32);}
+    const lid=[x,y+.78,z];for(let k=0;k<7;k++){const a=k*Math.PI*2/7;ball(groes,[x+Math.cos(a)*.3,y+.82,z+Math.sin(a)*.3],[.14,.09,.14],'#ffd166',32,-1,lid);}
+    ball(groes,[x,y+.95,z],[.18,.07,.18],'#ffe08a',32,-1,lid);
+  }
+  groel.build(proteins);groes.build(proteins,21);
   for(let attempt=0;attempt<10500;attempt++){
     const x=range(-20,20),z=range(-11,3.8),y=range(-13,1.2);
     if(y>surf(x,z,.83))continue;
@@ -678,7 +717,7 @@ async function start() {
   for(let i=0;i<240;i++)ions.add([0,0,0],[0,0,0],range(.025,.045),i%3?'#f9c943':'#ff73bb',i+.37);
   ions.build(particles,3);
   for(let i=0;i<540;i++)metabolites.add([range(-14,14),range(-11,1),range(-8,3)],[0,0,0],range(.025,.06),['#c4ede8','#ee87d0','#f5c84e'][i%3],range(0,100));
-  metabolites.build(particles);
+  metabolites.build(particles,20);
   const specks=new Beads();
   for(let i=0;i<1000;i++)specks.add([range(-25,25),i<550?range(6,28):range(-15,6),range(-18,9)],[0,0,0],range(.008,.032),'#e7f2ee',range(0,120));
   specks.build(suspension,8);metrics.suspendedParticleCount=1000;
@@ -697,6 +736,11 @@ async function start() {
       float d=depth(vUv),occ=0.,px=uSize.y/1000.,ws=max(1.,uFocus/14.);bool bg=d>uFar*.98;
       vec3 p=viewPos(vUv,d),n=normalize(cross(dFdx(p),dFdy(p)));
       vec3 col=texture2D(tColor,vUv).rgb;
+      if(uFx>.5&&!bg){
+        vec3 sum=col;float wsum=1.;
+        for(int i=0;i<8;i++){float a=float(i)*.7854;vec2 q=vUv+vec2(cos(a),sin(a))*1.8*max(px,.7)/uSize;float w=exp(-abs(depth(q)-d)/(.045*ws));sum+=texture2D(tColor,q).rgb*w;wsum+=w;}
+        col=mix(col,sum/wsum,.55);
+      }
       // Depth of field: golden-angle disk gather; sharp foreground samples are rejected so they do not bleed onto blurred backgrounds.
       float c=bg?0.:coc(d);
       if(uFx>.5&&c>.03){
@@ -754,10 +798,17 @@ async function start() {
     document.querySelector('.scene-heading p').textContent={cell:'Two micrometres of living machinery, dividing in two.',motor:'Molecular machinery, in motion.',envelope:'Two membranes. A world between them.',interior:'A dense landscape of folded proteins.'}[name];
   }
   setView('motor',true);
-  function stopTour(){state.tour=false;$('tour').setAttribute('aria-pressed','false');}
+  function stopTour(){state.tour=false;$('tour').setAttribute('aria-pressed','false');$('tour-label').textContent='Tour';}
   controls.addEventListener('start',()=>{transition=null;stopTour();});
   let tourElapsed=0,tourIndex=0;
-  $('tour').onclick=()=>{state.tour=!state.tour;$('tour').setAttribute('aria-pressed',String(state.tour));tourElapsed=0;tourIndex=0;if(state.tour){state.paused=false;playUI();setView('motor');}};
+  const tourStops=[{view:'cell',entry:'wholecell'},{entry:'bundle'},{view:'motor',entry:'cring'},{entry:'stators'},{entry:'filament'},{view:'envelope',entry:'efflux'},{entry:'porins'},{view:'interior',entry:'rnap'},{entry:'ribosomes'},{entry:'chaperonin'},{view:'cell',entry:'zring'}];
+  function goTourStop(i){
+    const stop=tourStops[i];state.tourStop=i;$('tour-label').textContent='Tour '+(i+1)+'/'+tourStops.length;
+    if(stop.view)setView(stop.view);
+    pendingTourEntry=stop;
+  }
+  let pendingTourEntry=null;
+  $('tour').onclick=()=>{state.tour=!state.tour;$('tour').setAttribute('aria-pressed',String(state.tour));tourElapsed=0;tourIndex=0;if(state.tour){state.paused=false;playUI();goTourStop(0);}else $('tour-label').textContent='Tour';};
   document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{stopTour();setView(b.dataset.view);}));
   function playUI(){$('play-text').textContent=state.paused?'Resume simulation':'Pause simulation';$('play-symbol').textContent=state.paused?'▶':'Ⅱ';$('play').setAttribute('aria-label',state.paused?'Resume simulation':'Pause simulation');$('dock-play').textContent=state.paused?'▶':'Ⅱ';$('dock-play').setAttribute('aria-label',state.paused?'Resume simulation':'Pause simulation');}
   function togglePlay(){state.paused=!state.paused;playUI();}
@@ -807,6 +858,7 @@ async function start() {
     export:axis(.55,-3.65,.5),cargo:axis(3.3,-3,.8),protons:axis(2.78,1.2,0),chey:[-1.6,-1.6,1],
     outer:onSurf(-8,1.5,5.0),lps:onSurf(-10.5,1.2,5.1,1.1),porins:onSurf(frontPorin[0],frontPorin[1],5.05),wall:onSurf(-4,1.5,4.02),periplasm:onSurf(-6.5,1,3),
     wholecell:[40.6,-128,0],bundle:[0,150,0],pili:[...pili].filter(t=>t[2]<1.5&&t[1]<-60&&t[1]>-150).sort((a,b)=>b[0]-a[0])[0]??pili[0],nucleoids:[7,-72,1],ribosomezone:[-27,-155,1],zring:[33,-105,0],min:[-30,-188,1],
+    rnap:[rnapSites[0][0],rnapSites[0][1]+.7,rnapSites[0][2]],chaperonin:[chaperoninSites[0][0]+.6,chaperoninSites[0][1]+.3,chaperoninSites[0][2]+.5],eftu:[ribosomeSites[2][0],ribosomeSites[2][1]+1.6,ribosomeSites[2][2]],
     inner:onSurf(9,1.6,1.85),atpsynthase:[atpSites[3][0]+.35,atpSites[3][1]-1.25,atpSites[3][2]+.35],chemoreceptors:[treeSites[0][0]+.5,surf(treeSites[0][0],treeSites[0][1],1.6)-1.8,treeSites[0][1]+.4],respiratory:receptorSites[0].slice(0,3),
     ribosomes:ribosomeSites[1],mrna:polyPath(...polysomes[0],3.5).toArray(),nascent:ribosomeSites[4].map((v,i)=>v+[-.4,-.9,.5][i]),efflux:onSurf(effluxSites[0][0]+.35,effluxSites[0][1]+.3,3.4),drugs:onSurf(effluxSites[3][0],effluxSites[3][1],5.6),crowd:[-6,-6,1.6],dna:[-7.5,-5,-.6],metabolites:[-2.2,-3.2,1.7],specks:[-7,11,3]
   };
@@ -822,7 +874,7 @@ async function start() {
     el.addEventListener('click',e=>{e.stopPropagation();openEntry(entry.id,false);});labelLayer.append(el);
     return {entry,el,pos:new THREE.Vector3(),width:entry.name.length*5.6+34};
   });
-  function openEntry(id,fly){
+  function openEntry(id,fly,keepTour=false){
     const entry=ENTRIES.find(e=>e.id===id);if(!entry)return;state.selected=id;
     $('annot-kicker').textContent=GROUPS[entry.group]+' · '+entry.kicker;$('annot-title').textContent=entry.name;$('annot-what').textContent=entry.what;
     $('annot-model').hidden=!entry.model;$('annot-model').textContent=entry.model?'In this model: '+entry.model:'';
@@ -832,7 +884,7 @@ async function start() {
     card.hidden=false;document.body.classList.add('annot-open');
     for(const b of document.querySelectorAll('[data-guide]'))b.setAttribute('aria-current',String(b.dataset.guide===id));
     if(fly){
-      stopTour();const anchor=anchorOf(entry,new THREE.Vector3()),dir=camera.position.clone().sub(controls.target).normalize();
+      if(!keepTour)stopTour();document.querySelector('h1').textContent=entry.name;document.querySelector('.scene-heading p').textContent=entry.kicker;const anchor=anchorOf(entry,new THREE.Vector3()),dir=camera.position.clone().sub(controls.target).normalize();
       transition={from:camera.position.clone(),targetFrom:controls.target.clone(),to:anchor.clone().addScaledVector(dir,entry.dist??8),targetTo:anchor,t:0};
       if(innerWidth<=760&&!document.body.classList.contains('panel-hidden'))togglePanel();
     }
@@ -847,6 +899,8 @@ async function start() {
     for(const entry of ENTRIES.filter(e=>e.group===group)){const b=document.createElement('button');b.type='button';b.dataset.guide=entry.id;b.setAttribute('aria-current','false');const n=document.createElement('strong'),k=document.createElement('span');n.textContent=entry.name;k.textContent=entry.kicker;b.append(n,k);b.onclick=()=>openEntry(entry.id,true);guide.append(b);}
   }
   metrics.annotationCount=ENTRIES.length;
+  // By the numbers: sourced facts about the whole cell.
+  for(const fact of FACTS){const li=document.createElement('li'),v=document.createElement('strong'),t=document.createElement('span'),a=document.createElement('a');v.textContent=fact.value;t.textContent=fact.text+' ';a.href=CITES[fact.cite].url;a.target='_blank';a.rel='noreferrer';a.textContent='source';a.title=CITES[fact.cite].text;t.append(a);li.append(v,t);$('facts').append(li);}
   const projected=new THREE.Vector3(),placed=[];
   function labels(){
     const w=$('viewport').clientWidth,h=$('viewport').clientHeight,panelOpen=!document.body.classList.contains('panel-hidden')&&innerWidth>760;
@@ -887,7 +941,7 @@ async function start() {
       // Chemotaxis: CheY-P binding periodically flips the motor to clockwise for a brief tumble, then it returns to its run direction.
       if(state.autoSwitch){if(tumbleUntil<0&&state.time>nextSwitch)setTumble(true);else if(tumbleUntil>0&&state.time>tumbleUntil)setTumble(false);}
       const targetOmega=1.65*state.direction*(tumbleUntil>0?-1:1);omega+=(targetOmega-omega)*Math.min(1,simDt*8);angle+=omega*simDt;
-      if(state.tour){tourElapsed+=dt;if(tourElapsed>11){tourElapsed=0;tourIndex=(tourIndex+1)%4;setView(['motor','envelope','interior','cell'][tourIndex]);}}
+      if(state.tour){tourElapsed+=dt;if(pendingTourEntry&&!transition){const stop=pendingTourEntry;pendingTourEntry=null;openEntry(stop.entry,!stop.view,true);}if(tourElapsed>9.5){tourElapsed=0;tourIndex=(tourIndex+1)%tourStops.length;goTourStop(tourIndex);}}
       // Idle camera breathes slowly around the target, like the reference's drifting shot.
       if(!interacting&&!transition&&!state.tour&&now-lastInteraction>6000){idleClock+=dt;camera.position.sub(controls.target).applyAxisAngle(camera.up,.045*Math.sin(idleClock*.13)*dt).add(controls.target);}
     }
@@ -909,6 +963,10 @@ async function start() {
     }
     controls.update();const focus=camera.position.distanceTo(controls.target);postMaterial.uniforms.uFocus.value=focus;fogUniform.value.set(focus*1.4+12,focus*3.6+46);
     const far=camera.position.distanceTo(slabCenter)>150;if(far!==lodFar){lodFar=far;resize();}
+    if(metrics.frames%6===0){
+      const perPx=2*focus*Math.tan(THREE.MathUtils.degToRad(camera.fov/2))/Math.max($('viewport').clientHeight,1)*10,nice=[5,10,20,50,100,200,500,1000,2000,5000].filter(n=>n/perPx<=130).pop()??5;
+      $('scale-line').style.width=(nice/perPx).toFixed(1)+'px';$('scale-text').textContent=nice>=1000?nice/1000+' µm':nice+' nm';
+    }
     tumbleUniform.value+=((tumbleUntil>0?1:0)-tumbleUniform.value)*Math.min(1,dt*(state.paused?0:2.5));postMaterial.uniforms.uLight.value.copy(lightWorld).transformDirection(camera.matrixWorldInverse);
     soundProjection.copy(motorSource).project(camera);
     sound.update({distance:camera.position.distanceTo(controls.target),motorDistance:camera.position.distanceTo(motorSource),motorPan:soundProjection.x,proteinDistance:camera.position.distanceTo(proteinSource),paused:state.paused,hidden:document.hidden,speed:state.speed,direction:Math.sign(omega)||state.direction,motorVisible:motor.visible&&soundProjection.z<1&&soundProjection.z>-1,proteinsVisible:proteins.visible,particlesVisible:particles.visible,time:state.time});

@@ -39,3 +39,17 @@
   - Six peritrichous flagella wrapping into a rotating helical bundle that splays during tumbles (kind 17, `uTumble`).
 - Rendering: camera far is 1600. Fog, ambient occlusion and contact-shadow scales follow orbit distance. Level of detail is reciprocal: the window thins to a third when the camera is more than 150 units away, and the coarse layer thins when close.
 - Navigation and labels: camera flights interpolate distance in log space for large scale changes. A Cell view is added, and the tour is motor → envelope → interior → cell. Labels are scale-aware (whole-cell pins only when the orbit distance is over 110). The field guide has 38 entries and 41 Crossref-checked citations.
+
+2026-10-15: Revision 8 (organic motion, blending, more machines and information).
+- Motion: protein drift is now a Catmull-Rom wander through hashed random keyframes plus a small tremor, so speed and heading change irregularly. Metabolites and periplasmic protons diffuse farther and faster (kind 20). LPS sway comes in gusts that sweep across the surface.
+- Blending: the post shader adds a depth-weighted 8-tap smoothing that merges neighbouring atoms of one molecule while keeping silhouettes.
+- New machines:
+  - RNA polymerase on a DNA template at the head of each polysome (expressome).
+  - EF-Tu·tRNA ternary complexes that travel to ribosomes, dock and release (kind 22).
+  - GroEL/GroES chaperonins whose lid caps, lifts away and returns (kind 21).
+- Information:
+  - A narrated tour of 11 stops, each opening its field-guide card.
+  - A live scale bar.
+  - A "By the numbers" panel of 7 cited facts.
+  - Headings follow the flown-to structure.
+- Field guide: 41 entries and 47 Crossref-checked citations.
