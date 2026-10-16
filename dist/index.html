@@ -7,7 +7,7 @@
   <meta name="description" content="Explore a living molecular landscape. An interactive bacterial cutaway with a rotating flagellar motor, layered membranes, and drifting proteins.">
   <title>Micro — Molecular Lab</title>
   <link rel="icon" type="image/svg+xml" href="./favicon.svg">
-  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./style.css?v=4">
   <script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
 </head>
 <body class="panel-hidden">
@@ -16,7 +16,7 @@
     <header class="topbar">
       <a class="brand" href="./" aria-label="Micro home"><span class="brand-mark">μ</span><span>micro<span class="brand-dot">.</span></span></a>
       <div class="top-title"><span class="eyebrow">THE LIVING CELL</span><span class="top-divider"></span><span class="top-sub">An interactive molecular landscape</span></div>
-      <button id="toggle-panel" class="icon-button" aria-label="Toggle controls" aria-expanded="false">☷ <span>Controls</span></button>
+      <div class="header-actions"><button id="toggle-sound" class="sound-button" aria-label="Enable sound" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="sound-waves" d="M16 8q4 4 0 8M19 5q7 7 0 14"/><path class="sound-slash" d="m3 3 18 18"/></svg><span id="sound-label">Sound off</span></button><button id="toggle-panel" class="icon-button" aria-label="Toggle controls" aria-expanded="false">☷ <span>Controls</span></button></div>
     </header>
     <div class="scene-heading"><div class="eyebrow"><span class="live-dot"></span> BENEATH THE SURFACE</div><h1>The bacterial flagellar motor</h1><p>Molecular machinery, in motion.</p></div>
     <nav class="scene-dock" aria-label="Explore the cell"><button id="dock-play" aria-label="Pause simulation">Ⅱ</button><span class="dock-divider"></span><button data-view="motor" class="active" aria-pressed="true">Motor</button><button data-view="envelope" aria-pressed="false">Envelope</button><button data-view="interior" aria-pressed="false">Interior</button><span class="dock-divider"></span><button id="tour" aria-pressed="false"><span class="tour-dot"></span> Tour</button></nav>
@@ -27,6 +27,7 @@
       <div class="control-section"><div class="section-title"><span>01</span> TIME & MOTION</div><div class="play-row"><button id="play" aria-label="Pause simulation"><span id="play-symbol">Ⅱ</span><span id="play-text">Pause simulation</span></button><span id="clock">00:00</span></div><label class="slider-label" for="speed">Playback speed<output id="speed-value">1.0×</output></label><input id="speed" type="range" min="0.1" max="2" value="1" step="0.1"><div class="range-endpoints"><span>CONTEMPLATIVE</span><span>ENERGETIC</span></div><button id="reverse" class="text-button"><span>↻</span> Reverse motor <span id="direction">CCW</span></button></div>
       <div class="control-section"><div class="section-title"><span>02</span> EXPLORE THE LAYERS</div><label class="slider-label" for="cut">Section depth<output id="cut-value">65%</output></label><input id="cut" type="range" min="0" max="100" value="65"><div class="range-endpoints"><span>DEEP SECTION</span><span>FULL DEPTH</span></div><label class="check-row"><span><i class="swatch gold"></i>Flagellar motor</span><input id="show-motor" type="checkbox" checked></label><label class="check-row"><span><i class="swatch lime"></i>Cell envelope</span><input id="show-envelope" type="checkbox" checked></label><label class="check-row"><span><i class="swatch cyan"></i>Molecular crowding</span><input id="show-proteins" type="checkbox" checked></label><label class="check-row"><span><i class="swatch orange"></i>Particle pathways</span><input id="show-particles" type="checkbox" checked></label></div>
       <div class="control-section compact"><div class="section-title"><span>03</span> APPEARANCE</div><div class="select-row"><label for="quality">Render quality</label><select id="quality"><option value="low">Performance</option><option value="balanced" selected>Balanced</option><option value="high">Fine detail</option></select></div><label class="check-row"><span>Depth shading</span><input id="ao" type="checkbox" checked></label><label class="check-row"><span>Scene annotations</span><input id="annotations" type="checkbox"></label></div>
+      <div class="control-section compact"><div class="section-title"><span>04</span> SOUND & SUSPENSION</div><label class="check-row"><span>Floating white specks</span><input id="show-specks" type="checkbox" checked></label><label class="check-row"><span>Soundscape</span><input id="sound-enabled" type="checkbox"></label><label class="slider-label sound-volume-label" for="volume">Volume<output id="volume-value">25%</output></label><input id="volume" type="range" min="0" max="100" value="25" step="1"><p class="sound-note">Muted textures become closer and clearer as you zoom in.</p><span id="sound-status" role="status">Sound is off</span></div>
       <div id="info-card"><div class="info-heading"><span class="info-dot"></span><strong id="info-title">The flagellar motor</strong></div><p id="info-text">A rotary machine spanning the cell envelope. The rotor turns the shaft and external filament while its supports stay anchored.</p><span class="info-note">ILLUSTRATIVE MODEL · MOTION SLOWED</span></div>
       <button id="reset" class="reset-button">↺ <span>Reset view</span><kbd>R</kbd></button>
       <details class="model-notes"><summary>About this model</summary><p>A visual interpretation of a bacterial cutaway. Molecular shapes use transformed surface atoms from representative PDB structures; these are shape references, not an inventory of bacterial proteins. Motor geometry, scale, pathways, and speed are schematic.</p><p>Shape data: RCSB PDB <a href="https://www.rcsb.org/structure/1LYZ" target="_blank" rel="noreferrer">1LYZ</a>, <a href="https://www.rcsb.org/structure/1UBQ" target="_blank" rel="noreferrer">1UBQ</a>, <a href="https://www.rcsb.org/structure/1ATP" target="_blank" rel="noreferrer">1ATP</a>, <a href="https://www.rcsb.org/structure/1GZX" target="_blank" rel="noreferrer">1GZX</a>.</p></details>
@@ -36,6 +37,6 @@
     <div id="loading"><div class="loading-mark">μ</div><p>Assembling a small world<span>…</span></p></div>
     <div id="error" hidden><h2>This world needs WebGL 2</h2><p id="error-message">Try a browser with hardware acceleration enabled.</p><button onclick="location.reload()">Try again</button></div>
   </main>
-  <script type="module" src="./app.js?v=3"></script>
+  <script type="module" src="./app.js?v=4"></script>
 </body>
 </html>

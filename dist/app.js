@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
+import { MolecularSoundscape } from './soundscape.js?v=4';
 
 const $ = id => document.getElementById(id);
 const state = { paused: matchMedia('(prefers-reduced-motion: reduce)').matches, speed: 1, direction: 1, time: 0, cut: 65, ao: true, labels: false, view: 'motor', quality: 'balanced', tour: false };
@@ -29,9 +30,10 @@ async function start() {
   scene.add(new THREE.HemisphereLight('#d9efde', '#162b38', 2));
   const key = new THREE.DirectionalLight('#fff2c9', 3); key.position.set(-8, 15, 15); scene.add(key);
   const fill = new THREE.DirectionalLight('#8bc7dc', 1); fill.position.set(12, 0, -6); scene.add(fill);
-  const proteins = new THREE.Group(), envelope = new THREE.Group(), motor = new THREE.Group(), particles = new THREE.Group();
-  scene.add(proteins, envelope, motor, particles);
-  const cutUniform = { value: 2.1 }, timeUniform = { value: 0 };
+  const proteins = new THREE.Group(), envelope = new THREE.Group(), motor = new THREE.Group(), particles = new THREE.Group(), suspension=new THREE.Group();
+  scene.add(proteins, envelope, motor, particles,suspension);
+  const sound=new MolecularSoundscape();window.__micro.sound=sound;
+  const cutUniform = { value: 2.1 }, timeUniform = { value: 0 },heightUniform={value:innerHeight};
   const materials = [], animated = [], beadMeshes = [];
   let seed = 8711;
   const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
@@ -39,13 +41,27 @@ async function start() {
   const palette = ['#51c8d6','#8cdee0','#42bacb','#5acbd3','#51b5d2','#83c9ed','#9bbbf2','#b1a7ef','#c57dd3','#ed95d6','#f2b5de','#8d63bf'];
   const colorCache = new Map();
   const rgb = c => { if (!colorCache.has(c)) colorCache.set(c, new THREE.Color(c)); return colorCache.get(c); };
+  const organicField=`
+    vec3 organicShape(vec3 p,float tm){
+      float r=length(p.xz),a=atan(p.z,p.x);
+      float drum=(1.-smoothstep(-.25,.15,p.y))*smoothstep(-2.3,-1.7,p.y);
+      float shaft=(1.-smoothstep(.3,.55,r))*smoothstep(-1.,0.,p.y)*(1.-smoothstep(5.7,6.2,p.y));
+      float collar=smoothstep(.75,1.,r)*(1.-smoothstep(1.6,1.9,r))*smoothstep(1.5,2.,p.y);
+      float radial=drum*(.055*sin(a*17.+p.y*4.)+.045*sin(a*7.-p.y*5.)+.017*sin(tm*2.+a*11.));
+      radial+=shaft*.018*sin(p.y*8.+a*5.+tm*1.4)+collar*(.035*sin(a*13.+p.y*5.)+.021*sin(a*21.-p.y));
+      p.xz*=1.+radial/max(r,.05);
+      p.y+=drum*(.03*sin(a*9.)+.012*sin(tm*2.+a*5.))+collar*.025*sin(a*11.);
+      p.x+=shaft*.018*sin(p.y*6.+tm);
+      return p;
+    }`;
   const beadVertex = `
     attribute vec3 aCenter, aOffset, aColor;
     attribute float aRadius, aSeed, aShade, aMicroId;
-    uniform float uTime,uRadiusScale,uMicroDetail,uMotionKind;
+    uniform float uTime,uRadiusScale,uMicroDetail,uMotionKind,uCssHeight;
     varying vec3 vCenter, vColor, vWorldCenter;
     varying vec2 vUv;
-    varying float vRadius, vShade, vAnchorZ;
+    varying float vRadius, vShade, vAnchorZ,vDust;
+    ${organicField}
     void main(){
       float p=aSeed;
       float moving=step(0.,p),tm=uTime*(.65+fract(p*.173)*.65);
@@ -65,12 +81,17 @@ async function start() {
       if(uMotionKind>2.5&&uMotionKind<3.5){float q=fract(uTime*(.38+fract(p)*.3)+p*.137);float a=floor(p)*.5712;centerPos=vec3(2.1+cos(a)*2.78,mix(3.6,-.6,q),.1+sin(a)*2.78);drift=vec3(sin(q*17.+p),0.,cos(q*13.+p))*.04;life=smoothstep(0.,.08,q)*(1.-smoothstep(.92,1.,q));}
       if(uMotionKind>3.5&&uMotionKind<4.5){off.y+=sin(uTime*2.2+aCenter.x*2.+aCenter.z*1.3)*.022;off.x+=sin(uTime*3.+aCenter.x*3.7+aCenter.z*2.9)*.012;}
       if(uMotionKind>4.5&&uMotionKind<5.5){float a=uTime*1.3+aCenter.x*.4;c=cos(a);s=sin(a);off=vec3(c*off.x+s*off.z,off.y,-s*off.x+c*off.z);off.y+=sin(uTime*3.+aCenter.x)*.035;}
-      if(uMotionKind>5.5&&aCenter.y<.8){float a=uTime*1.8+atan(aCenter.z,aCenter.x);c=cos(a);s=sin(a);off=vec3(c*off.x+s*off.z,off.y,-s*off.x+c*off.z);}
-      vec4 world=modelMatrix*vec4(centerPos+off+drift,1.);
+      if(uMotionKind>5.5&&uMotionKind<6.5&&aCenter.y<.8){float a=uTime*1.8+atan(aCenter.z,aCenter.x);c=cos(a);s=sin(a);off=vec3(c*off.x+s*off.z,off.y,-s*off.x+c*off.z);}
+      if(uMotionKind>7.5){centerPos+=vec3(sin(tm*.52+p)+.28*sin(tm*1.9+p*3.),cos(tm*.61+p*1.3),sin(tm*.43+p*2.))*(.4+fract(p)*.7);}
+      vec3 localPos=centerPos+off+drift;
+      if(uMotionKind>5.5&&uMotionKind<7.5)localPos=organicShape(localPos,uTime);
+      vec4 world=modelMatrix*vec4(localPos,1.);
       vAnchorZ=(modelMatrix*vec4(centerPos+drift,1.)).z;
       vec4 center=viewMatrix*world;
       float microScale=uMicroDetail>.5?(aMicroId<.5?.79:.43):1.;
       vCenter=center.xyz;vWorldCenter=world.xyz;vRadius=aRadius*uRadiusScale*microScale*life;vColor=aColor;vShade=aShade;
+      vDust=step(7.5,uMotionKind);
+      if(vDust>.5)vRadius=min(vRadius,3.*(-center.z)/(projectionMatrix[1][1]*uCssHeight));
       vUv=position.xy;
       center.xy+=position.xy*vRadius*1.08;
       gl_Position=projectionMatrix*center;
@@ -79,7 +100,7 @@ async function start() {
     uniform float uCut;uniform mat4 projectionMatrix;
     varying vec3 vCenter,vColor,vWorldCenter;
     varying vec2 vUv;
-    varying float vRadius,vShade,vAnchorZ;
+    varying float vRadius,vShade,vAnchorZ,vDust;
     void main(){
       vec3 ray=normalize(vec3(vCenter.xy+vUv*vRadius*1.08,vCenter.z));
       float b=dot(ray,vCenter);float c=dot(vCenter,vCenter)-vRadius*vRadius;
@@ -87,7 +108,7 @@ async function start() {
       float t=b-sqrt(h);if(t<=0.)discard;
       vec3 p=ray*t;vec3 normal=normalize(p-vCenter);
       vec3 worldP=(inverse(viewMatrix)*vec4(p,1.)).xyz;
-      if(vAnchorZ>uCut)discard;
+      if(vAnchorZ>uCut&&vDust<.5)discard;
       vec4 clip=projectionMatrix*vec4(p,1.);gl_FragDepth=clip.z/clip.w*.5+.5;
       vec3 light=normalize(mat3(viewMatrix)*vec3(-.35,.9,1.1));
       vec3 rough=vec3(cos(worldP.x*92.)*sin(worldP.y*83.)*sin(worldP.z*87.),sin(worldP.x*92.)*cos(worldP.y*83.)*sin(worldP.z*87.),sin(worldP.x*92.)*sin(worldP.y*83.)*cos(worldP.z*87.));
@@ -99,6 +120,7 @@ async function start() {
       vec3 col=vColor*(.32+.90*diffuse+.12*back)*mix(.69,1.,vShade)*(.98+grain*.025)+vColor*.045*rim;
       float fog=smoothstep(24.,64.,-p.z);col=mix(col,vec3(.008,.024,.036),fog*.45);
       gl_FragColor=vec4(col,1.);
+      if(vDust>.5){gl_FragColor=vec4(vec3(.72,.84,.86),smoothstep(0.,.45,h/max(vRadius*vRadius,.000001))*.5*(1.-smoothstep(30.,65.,-p.z)));}
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
     }`;
@@ -118,7 +140,7 @@ async function start() {
         geo.setAttribute(name,new THREE.InstancedBufferAttribute(data,size));
       }
       geo.instanceCount=this.r.length;
-      const mat=new THREE.ShaderMaterial({vertexShader:beadVertex,fragmentShader:beadFragment,uniforms:{uTime:timeUniform,uCut:cutUniform,uRadiusScale:{value:1},uMicroDetail:{value:this.detail?1:0},uMotionKind:{value:motionKind}}});
+      const mat=new THREE.ShaderMaterial({vertexShader:beadVertex,fragmentShader:beadFragment,transparent:motionKind===8,depthWrite:motionKind!==8,uniforms:{uTime:timeUniform,uCut:cutUniform,uRadiusScale:{value:1},uMicroDetail:{value:this.detail?1:0},uMotionKind:{value:motionKind},uCssHeight:heightUniform}});
       const mesh=new THREE.Mesh(geo,mat);mesh.frustumCulled=false;mesh.userData.fullCount=this.r.length;mesh.userData.detail=this.detail;beadMeshes.push(mesh);parent.add(mesh);materials.push(mat);metrics.sphereCount+=this.r.length;return mesh;
     }
   }
@@ -152,13 +174,14 @@ async function start() {
     const y=surf(x,z,range(2.45,3.35));ball(periplasm,[x,y,z],[range(.3,.55),range(.25,.45),range(.3,.55)],random()<.4?'#ddbd57':'#e7cf79',32,range(0,50));
   }
   membraneBeads.build(envelope,4);wallBeads.build(envelope);periplasm.build(envelope);
-  function material(color){
+  function material(color,organic=false){
     const m=new THREE.MeshStandardMaterial({color,roughness:.94,metalness:0});
     m.onBeforeCompile=shader=>{
       shader.uniforms.uCut=cutUniform;
+      if(organic){shader.uniforms.uTime=timeUniform;shader.vertexShader='uniform float uTime;\n'+organicField+'\n'+shader.vertexShader;shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\ntransformed=organicShape(transformed,uTime);');}
       shader.vertexShader='varying vec3 vWorldCut;\n'+shader.vertexShader.replace('#include <worldpos_vertex>','#include <worldpos_vertex>\nvWorldCut=(modelMatrix*vec4(transformed,1.)).xyz;');
       shader.fragmentShader='uniform float uCut;varying vec3 vWorldCut;\n'+shader.fragmentShader.replace('#include <clipping_planes_fragment>','#include <clipping_planes_fragment>\nif(vWorldCut.z>uCut)discard;');
-    };materials.push(m);return m;
+    };m.customProgramCacheKey=()=>organic?'organic-v4':'clipped';materials.push(m);return m;
   }
   function ribbon(base,color){
     const positions=[],indices=[];const nx=100,nz=32;
@@ -198,20 +221,20 @@ async function start() {
   // The hero motor has an independent rotor. Support assemblies remain anchored.
   const rotor = new THREE.Group();rotor.position.set(2.1,0,.1);motor.add(rotor);
   const fixed = new THREE.Group();fixed.position.copy(rotor.position);motor.add(fixed);
-  const yellow=material('#f2dc20'),gold=material('#e4bf83');
-  function tube(parent,r1,r2,h,y,mat){const mesh=new THREE.Mesh(new THREE.CylinderGeometry(r1,r2,h,72,1,true),mat);mesh.position.y=y;parent.add(mesh);return mesh;}
-  function torus(parent,r,t,y,mat){const mesh=new THREE.Mesh(new THREE.TorusGeometry(r,t,12,90),mat);mesh.rotation.x=Math.PI/2;mesh.position.y=y;parent.add(mesh);return mesh;}
+  const yellow=material('#f2dc20',true),gold=material('#e4bf83',true);
+  function tube(parent,r1,r2,h,y,mat){const geometry=new THREE.CylinderGeometry(r1,r2,h,96,18,true);geometry.translate(0,y,0);const mesh=new THREE.Mesh(geometry,mat);parent.add(mesh);return mesh;}
+  function torus(parent,r,t,y,mat){const geometry=new THREE.TorusGeometry(r,t,18,120);geometry.rotateX(Math.PI/2);geometry.translate(0,y,0);const mesh=new THREE.Mesh(geometry,mat);parent.add(mesh);return mesh;}
   tube(rotor,2.32,2.32,1.35,-1.05,yellow);torus(rotor,2.24,.17,-1.75,yellow);torus(rotor,2.24,.18,-.35,yellow);
   tube(rotor,.27,.27,6.8,2.5,gold);torus(rotor,.72,.16,1.9,yellow);torus(fixed,1.03,.22,4.02,gold);torus(fixed,1.13,.26,4.97,gold);
   const rotorBeads=new Beads(),supportBeads=new Beads(true);
   for(let i=0;i<34;i++){
     const a=i*Math.PI*2/34;
-    ball(rotorBeads,[Math.cos(a)*2.28,-1.04,Math.sin(a)*2.28],[.25,.68,.25],'#ffe928',65);
-    for(let t=0;t<1;t+=.035){const r=1.83+t*.54;rotorBeads.add([Math.cos(a)*r,-.27+Math.sin(t*Math.PI)*.045,Math.sin(a)*r],[0,0,0],.031,'#fff34d');}
+    ball(rotorBeads,[Math.cos(a)*2.28,-1.04,Math.sin(a)*2.28],[.23,.66,.22],'#ffe928',65);
+    ball(rotorBeads,[Math.cos(a)*2.14,-.25,Math.sin(a)*2.14],[.15,.09,.14],'#fff34d',32);
   }
   for(let i=0;i<9;i++){
     const a=i*Math.PI*2/9;
-    for(let t=0;t<1;t+=.016){const r=.25+t*1.65;rotorBeads.add([Math.cos(a+t*.13)*r,-1.15+t*.48,Math.sin(a+t*.13)*r],[0,0,0],.035,'#efc92a');}
+    for(let t=0;t<1;t+=.014){const r=.25+t*1.65,curve=a+.14*Math.sin(t*Math.PI);for(let j=0;j<5;j++){const h=j*1.256+t*13.;rotorBeads.add([Math.cos(curve)*r+Math.sin(h)*.035,-1.15+t*.48-.16*Math.sin(t*Math.PI)+Math.cos(h)*.035,Math.sin(curve)*r],[0,0,0],.022,'#efc92a');}}
   }
   for(let i=0;i<110000;i++){
     const a=range(0,Math.PI*2),r=Math.sqrt(range(i%2?3.35:.42,5.6));
@@ -226,15 +249,17 @@ async function start() {
     const a=range(0,6.283),y=range(-1.67,-.36),r=1.84+range(-.025,.025);
     rotorBeads.add([Math.cos(a)*r,y,Math.sin(a)*r],[0,0,0],range(.023,.037),'#ceb52e',-1,.72);
   }
-  for(let y=-1;y<6.2;y+=.055)for(let a=0;a<Math.PI*2;a+=.15)rotorBeads.add([Math.cos(a+y*.8)*.275,y,Math.sin(a+y*.8)*.275],[0,0,0],.034,'#cbb478');
+  for(let y=-.8;y<6.2;y+=.33)ball(rotorBeads,[0,y,0],[.2,.18,.2],'#d3b981',32);
+  for(let i=0;i<26000;i++){const y=range(-1,6.2),a=range(0,6.283),r=.274+range(-.012,.012);rotorBeads.add([Math.cos(a+y*.7)*r,y,Math.sin(a+y*.7)*r],[0,0,0],range(.013,.022),'#d7bd88');}
   function coatRing(batch,r,t,y,color){
-    for(let i=0;i<6500;i++){const a=range(0,6.283),b=range(0,6.283),rr=r+Math.cos(b)*t;batch.add([Math.cos(a)*rr,y+Math.sin(b)*t,Math.sin(a)*rr],[0,0,0],range(.025,.042),color);}
+    for(let i=0;i<11000;i++){const a=range(0,6.283),b=range(0,6.283),tt=t*(1.+.09*Math.sin(a*13.)+.06*Math.sin(a*7.)),rr=r+Math.cos(b)*tt;batch.add([Math.cos(a)*rr,y+Math.sin(b)*tt,Math.sin(a)*rr],[0,0,0],range(.019,.033),color);}
   }
   coatRing(rotorBeads,2.24,.17,-1.75,'#e1c42e');coatRing(rotorBeads,2.24,.18,-.35,'#e5cb3d');coatRing(supportBeads,1.03,.22,4.02,'#c5ad72');coatRing(supportBeads,1.13,.26,4.97,'#d6bd86');coatRing(rotorBeads,.72,.16,1.9,'#ddc34a');
   for(let i=0;i<11;i++){
     const a=i*Math.PI*2/11,x=Math.cos(a)*2.78,z=Math.sin(a)*2.78;
     ball(supportBeads,[x,.05,z],[.40,.51,.36],'#ef8fcd',145);
-    for(let y=.65;y<3.3;y+=.055){supportBeads.add([x,y,z],[0,0,0],.037,'#c9bc5d');supportBeads.add([x+.075,y,z],[0,0,0],.034,'#c2b452');}
+    for(let y=.65;y<3.3;y+=.035){const t=(y-.65)/2.65,bend=Math.sin(t*Math.PI)*.12*Math.sin(a*2.1);supportBeads.add([x+bend,y,z+Math.sin(t*Math.PI)*.06],[0,0,0],.031,'#c9bc5d');supportBeads.add([x+.075+bend,y,z+Math.sin(t*Math.PI)*.06],[0,0,0],.026,'#c2b452');}
+    ball(supportBeads,[x+.04,1.4,z],[.08,.15,.08],'#cdb763',32);ball(supportBeads,[x+.04,2.7,z],[.1,.16,.09],'#d5c16d',32);
     ball(supportBeads,[x,3.25,z],[.3,.24,.3],'#d5bd65',65);
   }
   ball(rotorBeads,[0,-3.65,0],[.62,.4,.62],'#d77b33',250);
@@ -249,7 +274,7 @@ async function start() {
   for(let i=0;i<350;i++){
     const p=hookCurve.getPoint(i/349);for(let j=0;j<32;j++){const a=j*Math.PI*2/32+i*.32;rotorBeads.add([p.x+Math.cos(a)*.35,p.y,p.z+Math.sin(a)*.35],[0,0,0],range(.023,.037),'#d6c18c');}
   }
-  rotorBeads.build(rotor);supportBeads.build(fixed,6);
+  rotorBeads.build(rotor,7);supportBeads.build(fixed,6);
 
   const machinery=new Beads(true);
   for(const [x,z] of [[-8,1],[-10,-2],[8,-1],[11,-4]]){
@@ -318,6 +343,9 @@ async function start() {
   ions.build(particles,3);
   for(let i=0;i<540;i++)metabolites.add([range(-14,14),range(-11,1),range(-8,3)],[0,0,0],range(.025,.06),['#c4ede8','#ee87d0','#f5c84e'][i%3],range(0,100));
   metabolites.build(particles);
+  const specks=new Beads();
+  for(let i=0;i<1000;i++)specks.add([range(-25,25),i<550?range(6,28):range(-15,6),range(-18,9)],[0,0,0],range(.008,.032),'#e7f2ee',range(0,120));
+  specks.build(suspension,8);metrics.suspendedParticleCount=1000;
   const target=new THREE.WebGLRenderTarget(1,1,{minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter,depthBuffer:true});
   target.depthTexture=new THREE.DepthTexture(1,1,THREE.UnsignedIntType);
   const postScene=new THREE.Scene(),postCamera=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
@@ -387,7 +415,7 @@ async function start() {
   if(innerWidth<=760){document.body.classList.add('panel-hidden');$('toggle-panel').setAttribute('aria-expanded','false');}
   document.addEventListener('keydown',e=>{if(/INPUT|SELECT|BUTTON|TEXTAREA/.test(e.target.tagName))return;if(e.code==='Space'){e.preventDefault();togglePlay();}if(e.key.toLowerCase()==='r'){stopTour();setView('motor');}if(e.key.toLowerCase()==='h')togglePanel();});
   function resize(){
-    const bounds=$('viewport').getBoundingClientRect();
+    const bounds=$('viewport').getBoundingClientRect();heightUniform.value=bounds.height;
     const scale={low:.65,balanced:1.15,high:1.45}[state.quality];
     renderer.setPixelRatio(Math.min(devicePixelRatio,1.5)*scale);renderer.setSize(bounds.width,bounds.height);camera.aspect=bounds.width/bounds.height;camera.fov=bounds.width<600?55:40;camera.updateProjectionMatrix();
     const size=renderer.getDrawingBufferSize(new THREE.Vector2());target.setSize(size.x,size.y);postMaterial.uniforms.uSize.value.copy(size);
@@ -396,6 +424,17 @@ async function start() {
     for(const mesh of beadMeshes){const fine=mesh.userData.detail&&state.quality!=='low';mesh.geometry.instanceCount=state.quality==='low'?Math.ceil(mesh.userData.fullCount/3):mesh.userData.fullCount;mesh.geometry.setDrawRange(0,fine?24:6);mesh.material.uniforms.uMicroDetail.value=fine?1:0;mesh.material.uniforms.uRadiusScale.value=state.quality==='low'?1.35:1;metrics.activeSphereCount+=mesh.geometry.instanceCount;metrics.renderedSphereCount+=mesh.geometry.instanceCount*(fine?4:1);}
   }
   $('quality').onchange=e=>{state.quality=e.target.value;resize();};window.addEventListener('resize',resize);resize();
+  $('show-specks').onchange=e=>{suspension.visible=e.target.checked;};
+  let soundPending=false;
+  async function toggleSound(){
+    if(soundPending)return;soundPending=true;$('toggle-sound').disabled=true;$('sound-enabled').disabled=true;
+    try{await sound.setEnabled(!sound.enabled);$('sound-status').textContent=sound.enabled?'On · responds to camera distance':'Sound is off';}
+    catch{$('sound-status').textContent='Audio could not start. Tap the speaker to try again.';}
+    finally{soundPending=false;$('toggle-sound').disabled=false;$('sound-enabled').disabled=false;$('toggle-sound').setAttribute('aria-pressed',String(sound.enabled));$('toggle-sound').setAttribute('aria-label',sound.enabled?'Mute sound':'Enable sound');$('sound-label').textContent=sound.enabled?'Sound on':'Sound off';$('sound-enabled').checked=sound.enabled;}
+  }
+  $('toggle-sound').onclick=toggleSound;$('sound-enabled').onchange=toggleSound;
+  slider($('volume'));$('volume').oninput=e=>{sound.volume=+e.target.value/100;$('volume-value').value=e.target.value+'%';slider(e.target);};
+  const motorSource=new THREE.Vector3(2.1,-.8,.1),proteinSource=new THREE.Vector3(-4,-3,0),soundProjection=new THREE.Vector3();
   const anchors={motor:new THREE.Vector3(4.9,-1.3,1.4),outer:new THREE.Vector3(-8,4.5,1.5),inner:new THREE.Vector3(9,.7,1.6),cyto:new THREE.Vector3(-6,-6,2)};
   const projected=new THREE.Vector3();
   function labels(){
@@ -417,7 +456,10 @@ async function start() {
     for(let i=0;i<animated.length;i++){animated[i].rotation.y=state.time*(.6+i*.13);animated[i].rotation.z=Math.sin(state.time*1.2+i)*.12;}
     metrics.rotorAngle=angle;
     if(transition){transition.t=Math.min(transition.t+dt/1.1,1);const t=transition.t*tEase(transition.t);camera.position.lerpVectors(transition.from,transition.to,t);controls.target.lerpVectors(transition.targetFrom,transition.targetTo,t);if(transition.t===1)transition=null;}
-    controls.update();postMaterial.uniforms.uFocus.value=camera.position.distanceTo(controls.target);renderer.setRenderTarget(target);renderer.render(scene,camera);metrics.drawCalls=renderer.info.render.calls;renderer.setRenderTarget(null);renderer.render(postScene,postCamera);labels();
+    controls.update();postMaterial.uniforms.uFocus.value=camera.position.distanceTo(controls.target);
+    soundProjection.copy(motorSource).project(camera);
+    sound.update({distance:camera.position.distanceTo(controls.target),motorDistance:camera.position.distanceTo(motorSource),motorPan:soundProjection.x,proteinDistance:camera.position.distanceTo(proteinSource),paused:state.paused,hidden:document.hidden,speed:state.speed,direction:state.direction,motorVisible:motor.visible&&soundProjection.z<1&&soundProjection.z>-1,proteinsVisible:proteins.visible,particlesVisible:particles.visible,time:state.time});
+    renderer.setRenderTarget(target);renderer.render(scene,camera);metrics.drawCalls=renderer.info.render.calls;renderer.setRenderTarget(null);renderer.render(postScene,postCamera);labels();
     frameCount++;metrics.frames++;
     if(now-sample>1000){metrics.fps=Math.round(frameCount*1000/(now-sample));$('fps').textContent=metrics.fps+' FPS';frameCount=0;sample=now;const seconds=Math.floor(state.time);$('clock').textContent=String(Math.floor(seconds/60)).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0');}
     if(!metrics.ready){metrics.ready=true;$('loading').classList.add('hidden');$('render-status').textContent='MOLECULAR LANDSCAPE';}

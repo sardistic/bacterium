@@ -19,3 +19,28 @@ The fullscreen viewer starts with controls closed. Open Controls for layer and p
 The active scene combines independent protein tumbling/drift, flexible surface strands, small membrane movements, anchored local machinery motion, and stylized cargo/ion transport. Every animated subsystem uses simulation time and freezes when paused. Fine surfaces add procedural granules around source atoms; these are visual detail, not extra measured atoms. Performance mode disables the extra granules, thins source atoms across the scene, and reduces resolution.
 
 Molecular shape data comes from transformed surface atoms in RCSB PDB entries [1LYZ](https://www.rcsb.org/structure/1LYZ), [1UBQ](https://www.rcsb.org/structure/1UBQ), [1ATP](https://www.rcsb.org/structure/1ATP), and [1GZX](https://www.rcsb.org/structure/1GZX). These are representative shape templates, including non-bacterial proteins, not a claim that these molecules belong in this cell or motor. Atom radii, scale, packing, and animation are illustrative. Source coordinates are not fetched at runtime. Regenerate the compact surface-atom library by downloading those four .pdb files from files.rcsb.org/download into a local directory, then running `python scripts/prepare-molecules.py <directory>`.
+
+Sound starts off. Tap the speaker to enable muted, interpretive sound; camera distance controls blend, filtering, and stereo motor placement. Pause and tab visibility silence the mix. Controls includes volume and a separate floating-white-speck toggle. Procedural preview sounds work fully offline after the app loads.
+
+ElevenLabs replacement workflow: no connection or API key was configured when this version was built, so no provider generation has run. The current sound is procedural. Inspect the sound briefs with:
+
+```powershell
+python scripts/generate-soundscape.py
+```
+
+After configuring ELEVENLABS_API_KEY in the local process environment (never in source or browser code), explicitly generate the three paid looping stems:
+
+```powershell
+python scripts/generate-soundscape.py --generate
+```
+
+The generator uses the [ElevenLabs sound-effects API](https://elevenlabs.io/docs/api-reference/text-to-sound-effects/convert), stores fluid/motor/membrane MP3s locally, and switches assets/audio/manifest.json only after all three succeed. Validate playback and publish the same Site to serve them. The mixer level-matches supplied stems and retains the same distance behavior. Missing/incomplete assets fall back to procedural preview. No API key is embedded in the site.
+
+Checks for the current source:
+
+```powershell
+npm run check
+python -m unittest discover -s tests -v
+```
+
+The Python tests mock provider responses and make no paid requests. They cover the no-request default, missing-key guard, complete local asset/manifest assembly, and preservation of existing audio after a partial provider failure.

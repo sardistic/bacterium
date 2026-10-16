@@ -3,3 +3,6 @@ docs/agent/HANDOFF.md
 node_modules/
 .sites-runtime/
 *.tar.gz
+__pycache__/
+*.py[cod]
+dist/assets/audio/*.tmp
