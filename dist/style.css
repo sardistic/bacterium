@@ -5,3 +5,40 @@
 @media(max-width:760px){.topbar{height:60px;padding:0 17px;gap:16px}.brand{font-size:25px}.brand-mark{width:26px;height:26px}.top-title .eyebrow{font-size:7px;letter-spacing:1.7px}.top-sub{display:none}.icon-button{height:31px;padding:0 9px}.icon-button span{display:none}.scene-heading{top:auto;bottom:101px;left:20px}h1{font-size:23px;max-width:260px}.scene-heading .eyebrow{font-size:6px}.scene-dock{bottom:33px;width:calc(100% - 28px);justify-content:center;gap:0;padding:5px}.scene-dock button{font-size:10px;padding:10px 13px}.scene-dock #dock-play{padding:7px 12px}.dock-divider{margin:0 2px}.scene-dock #tour{padding:10px 11px}.bottom-bar{padding:0 19px;height:24px}.interaction-hint{font-size:7px}.interaction-hint i{margin:0 4px}.render-status{display:none}#panel{top:65px;right:10px;bottom:95px;width:min(300px,calc(100% - 20px))}body:not(.panel-hidden) .scene-dock{left:50%}body:not(.panel-hidden) .scene-heading{opacity:0}.top-title .eyebrow{color:#a9beb1}}
 .model-notes{margin-top:20px;border-top:1px solid #d4e8a016;padding-top:14px;font-size:10px;color:#8b9f96}.model-notes summary{cursor:pointer}.model-notes p{font-size:9px;line-height:1.7}.model-notes a{color:#c0d69d;text-underline-offset:2px}
 .header-actions{margin-left:auto;display:flex;align-items:center;gap:8px}.header-actions #toggle-panel{margin-left:0}.sound-button{display:flex;align-items:center;gap:8px;height:33px;padding:0 12px;border:1px solid #ffffff14;border-radius:7px;background:#0b1518b3;backdrop-filter:blur(12px);font-size:10px;color:#a6b8ae}.sound-button svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}.sound-button .sound-waves{display:none}.sound-button[aria-pressed=true]{color:#d4e8a0;border-color:#d4e8a033}.sound-button[aria-pressed=true] .sound-slash{display:none}.sound-button[aria-pressed=true] .sound-waves{display:block}.sound-button:disabled{opacity:.5;cursor:wait}.sound-volume-label{margin-top:19px}.sound-note{font-size:9px;color:#91a59a;line-height:1.65;margin:12px 0 8px}#sound-status{font-size:8px;color:#b7c6a5}@media(max-width:760px){.sound-button{height:31px;padding:0 9px}.sound-button>span{display:none}.header-actions{gap:6px}.topbar{gap:12px}.top-title .eyebrow{font-size:6px;letter-spacing:1.2px}}
+/* Annotations: a pin per structure, a docked detail card with sources, and a field guide in the panel. */
+#labels{display:block;position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:3}
+.pin{position:absolute;left:0;top:0;display:flex;align-items:center;gap:7px;padding:3px 8px 3px 3px;border:1px solid #d4e8a024;border-radius:999px;background:#071115b8;backdrop-filter:blur(8px);color:#dbe5d4;font-size:9.5px;line-height:1;white-space:nowrap;opacity:0;visibility:hidden;pointer-events:auto;transition:opacity .25s,visibility .25s,border-color .2s,background .2s}
+.pin.on{opacity:1;visibility:visible}
+.pin i{width:12px;height:12px;border-radius:50%;border:1px solid #d4e8a0aa;background:radial-gradient(circle,#d4e8a0 0 2px,transparent 2.5px);flex-shrink:0}
+.pin:hover,.pin:focus-visible{border-color:#d4e8a066;background:#0d1d20e6;color:#fff}
+.pin.selected{border-color:#d4e8a0;background:#1b2a1ef0;color:#f0f7e2}
+.pin.selected i{background:radial-gradient(circle,#d4e8a0 0 3px,transparent 3.5px);box-shadow:0 0 0 4px #d4e8a026;animation:pin-pulse 1.8s ease-in-out infinite}
+@keyframes pin-pulse{50%{box-shadow:0 0 0 7px #d4e8a010}}
+#annot-card{position:absolute;left:24px;top:78px;z-index:7;width:min(350px,calc(100% - 48px));max-height:calc(100% - 270px);overflow:auto;scrollbar-width:thin;padding:18px 20px 16px;border:1px solid #b4cebd2a;border-radius:10px;background:#0a1518f0;backdrop-filter:blur(18px);box-shadow:0 15px 50px #0008}
+#annot-card[hidden]{display:none}
+#annot-close{position:absolute;top:8px;right:9px;width:28px;height:28px;border:0;border-radius:6px;background:transparent;color:#9fb1a8;font-size:18px}
+#annot-close:hover{background:#ffffff10;color:#fff}
+.annot-kicker{display:block;font-size:9px;letter-spacing:.6px;color:var(--accent);padding-right:26px;line-height:1.6}
+#annot-card h3{font:400 22px/1.2 Georgia,serif;letter-spacing:-.4px;margin:8px 0 10px}
+#annot-what{font-size:11.5px;line-height:1.65;color:#d1dbd3;margin:0 0 10px}
+.annot-model{font-size:10px;line-height:1.6;color:#94a79d;margin:0 0 12px;padding-left:10px;border-left:2px solid #d4e8a033}
+.annot-sources{font-size:7.5px;letter-spacing:1.4px;text-transform:uppercase;color:#7f948a;margin-top:4px}
+#annot-cites{margin:7px 0 0;padding-left:16px;font-size:9.5px;line-height:1.5;color:#7f948a}
+#annot-cites li{margin-bottom:6px}
+#annot-cites a{color:#bcd497;text-decoration:none;border-bottom:1px solid #bcd49733}
+#annot-cites a:hover{border-bottom-color:#bcd497}
+#annot-cites .no-cite{list-style:none;margin-left:-16px;font-style:italic}
+.guide-note{font-size:9.5px;line-height:1.6;color:#8b9f96;margin:-6px 0 10px}
+.guide-group{font-size:7.5px;letter-spacing:1.4px;text-transform:uppercase;color:#6f8077;margin:14px 0 4px}
+#guide-list button{display:block;width:100%;text-align:left;background:none;border:0;border-radius:5px;padding:6px 8px;margin:0 -8px;width:calc(100% + 16px)}
+#guide-list button:hover,#guide-list button[aria-current=true]{background:#d4e8a012}
+#guide-list strong{display:block;font-size:10.5px;font-weight:500;color:#dbe5d4}
+#guide-list span{display:block;font-size:8.5px;color:#82958c;margin-top:2px}
+@media(max-width:760px){#annot-card{left:10px;right:10px;top:auto;bottom:140px;width:auto;max-height:46vh}.pin{font-size:8.5px}.pin span{max-width:120px;overflow:hidden;text-overflow:ellipsis}}
+@media(max-width:760px){body.annot-open .scene-heading{opacity:0}}
+/* Motor state pill: reports chemotaxis runs and tumbles. */
+.motor-state{position:absolute;top:74px;left:50%;transform:translateX(-50%);z-index:5;display:flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid #d4e8a024;border-radius:999px;background:#071115b8;backdrop-filter:blur(8px);color:#cfdcc8;font-size:9.5px;white-space:nowrap;transition:border-color .3s,color .3s,background .3s}
+.motor-state i{width:6px;height:6px;border-radius:50%;background:#d4e8a0;box-shadow:0 0 8px #d4e8a088}
+.motor-state.tumble{border-color:#93f03a88;color:#e6ffd0;background:#14260fd0}
+.motor-state.tumble i{background:#b8ff4a;animation:pin-pulse .6s ease-in-out infinite}
+@media(max-width:760px){.motor-state{top:66px;font-size:8.5px;max-width:calc(100% - 28px);overflow:hidden;text-overflow:ellipsis}}

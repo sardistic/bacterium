@@ -1,5 +1,7 @@
 # Micro — Molecular Lab
 
+Live: https://bacterium.sardistic.com (GitHub Pages, deployed from `dist/` by `.github/workflows/pages.yml` on every push to `main`).
+
 Interactive, illustrative bacterial cutaway inspired by the supplied reference video. A rotating flagellar motor sits inside a layered envelope and crowded molecular interior. Molecular identities, dimensions, timing, and pathways are schematic.
 
 Run locally with Python 3:
@@ -15,6 +17,10 @@ Drag to orbit, scroll or pinch to zoom, right-drag to pan, Space to pause, R to 
 The original reference video is not included in the site. Sites identity and static hosting configuration are in .openai/hosting.json. Source synchronization and publication use the Sites skill's workflow helper.
 
 The fullscreen viewer starts with controls closed. Open Controls for layer and playback settings, or use the floating camera presets. Tour cycles through the three views; dragging the camera or choosing a preset stops it.
+
+Every structure carries an annotation pin. Select a pin, or pick a structure in Controls → Field guide, to see what it does, how this model simplifies it, and its literature sources (DOI links checked against Crossref, defined in dist/annotations.js). The flagellar filament places flagellin subunits on the measured one-start helix and rotates as a supercoiled helix with the motor. The hook is a woven, flared sleeve, and the stators are spinning MotA pentamers.
+
+Revision 6 adds film-style lighting: motion blur on spinning parts, depth of field, ambient occlusion, contact shadows and a color grade. Performance quality turns the extras off. The scene now shows live processes. The motor switches between runs and tumbles when CheY-P docks (the status pill at the top reports each switch, and Controls can turn it off). Ribosomes translate mRNA into growing protein chains, ATP synthase rotors spin, and efflux pumps expel drugs. The envelope shows bilayer tails, a woven cell wall, dense LPS and a periplasmic proton pool.
 
 The active scene combines independent protein tumbling/drift, flexible surface strands, small membrane movements, anchored local machinery motion, and stylized cargo/ion transport. Every animated subsystem uses simulation time and freezes when paused. Fine surfaces add procedural granules around source atoms; these are visual detail, not extra measured atoms. Performance mode disables the extra granules, thins source atoms across the scene, and reduces resolution.
 
