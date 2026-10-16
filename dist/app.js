@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
 
 const $ = id => document.getElementById(id);
-const state = { paused: matchMedia('(prefers-reduced-motion: reduce)').matches, speed: .7, direction: 1, time: 0, cut: 65, ao: true, labels: true, view: 'motor', quality: 'balanced' };
+const state = { paused: matchMedia('(prefers-reduced-motion: reduce)').matches, speed: .7, direction: 1, time: 0, cut: 65, ao: true, labels: false, view: 'motor', quality: 'balanced', tour: false };
 const metrics = { ready: false, frames: 0, sphereCount: 0, drawCalls: 0, fps: 0, shaderErrors: [] };
 window.__micro = { state, metrics };
 
@@ -10,6 +10,9 @@ function fail(error) { console.error(error); $('loading').classList.add('hidden'
 try { await start(); } catch (error) { fail(error); }
 
 async function start() {
+  const response=await fetch('./assets/molecules.json');
+  if(!response.ok)throw new Error('The molecular shape library could not load. Please reload.');
+  const templates=await response.json();
   const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -17,8 +20,9 @@ async function start() {
   renderer.debug.onShaderError = (gl, program, vs, fs) => { const message = gl.getProgramInfoLog(program) + gl.getShaderInfoLog(vs) + gl.getShaderInfoLog(fs); metrics.shaderErrors.push(message); fail(new Error('A graphics shader could not compile. ' + message)); };
   $('viewport').append(renderer.domElement);
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color('#080f13');
+  scene.background = new THREE.Color('#030708');
   const camera = new THREE.PerspectiveCamera(40, 1, .1, 120);
+  camera.up.set(-.27,.963,0);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true; controls.dampingFactor = .065; controls.minDistance = 6; controls.maxDistance = 65;
   controls.maxPolarAngle = Math.PI * .86; controls.target.set(1, 1.5, 0);
@@ -28,32 +32,32 @@ async function start() {
   const proteins = new THREE.Group(), envelope = new THREE.Group(), motor = new THREE.Group(), particles = new THREE.Group();
   scene.add(proteins, envelope, motor, particles);
   const cutUniform = { value: 2.1 }, timeUniform = { value: 0 };
-  const materials = [], animated = [];
+  const materials = [], animated = [], beadMeshes = [];
   let seed = 8711;
   const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
   const range = (a,b) => a + random() * (b-a);
-  const palette = ['#60b7c6','#8ccfd0','#579eae','#96b9d1','#8c99c2','#c58ac1','#a861a9','#d69bc6'];
+  const palette = ['#66b8c7','#8bd1d0','#5fa6b5','#75b9c4','#71aebe','#85b9cc','#8eacd0','#999bc6','#b585bd','#d38cbf'];
   const colorCache = new Map();
   const rgb = c => { if (!colorCache.has(c)) colorCache.set(c, new THREE.Color(c)); return colorCache.get(c); };
   const beadVertex = `
     attribute vec3 aCenter, aOffset, aColor;
     attribute float aRadius, aSeed, aShade;
-    uniform float uTime;
+    uniform float uTime,uRadiusScale;
     varying vec3 vCenter, vColor, vWorldCenter;
     varying vec2 vUv;
     varying float vRadius, vShade, vAnchorZ;
     void main(){
       float p=aSeed;
-      vec3 drift=vec3(sin(uTime*.39+p),sin(uTime*.31+p*1.3),cos(uTime*.27+p))*step(0.,p)*.075;
-      float angle=uTime*.045*step(0.,p)*sin(p);
+      vec3 drift=vec3(sin(uTime*.39+p),sin(uTime*.31+p*1.3),cos(uTime*.27+p))*step(0.,p)*.11;
+      float angle=uTime*.065*step(0.,p)*sin(p);
       float c=cos(angle),s=sin(angle);
       vec3 off=vec3(c*aOffset.x+s*aOffset.z,aOffset.y,-s*aOffset.x+c*aOffset.z);
       vec4 world=modelMatrix*vec4(aCenter+off+drift,1.);
       vAnchorZ=(modelMatrix*vec4(aCenter+drift,1.)).z;
       vec4 center=viewMatrix*world;
-      vCenter=center.xyz;vWorldCenter=world.xyz;vRadius=aRadius;vColor=aColor;vShade=aShade;
+      vCenter=center.xyz;vWorldCenter=world.xyz;vRadius=aRadius*uRadiusScale;vColor=aColor;vShade=aShade;
       vUv=position.xy;
-      center.xy+=position.xy*aRadius*1.08;
+      center.xy+=position.xy*vRadius*1.08;
       gl_Position=projectionMatrix*center;
     }`;
   const beadFragment = `
@@ -70,14 +74,14 @@ async function start() {
       vec3 worldP=(inverse(viewMatrix)*vec4(p,1.)).xyz;
       if(vAnchorZ>uCut)discard;
       vec4 clip=projectionMatrix*vec4(p,1.);gl_FragDepth=clip.z/clip.w*.5+.5;
-      vec3 light=normalize(mat3(viewMatrix)*vec3(-.5,.9,.8));
+      vec3 light=normalize(mat3(viewMatrix)*vec3(-.65,.8,.65));
       vec3 rough=vec3(cos(worldP.x*92.)*sin(worldP.y*83.)*sin(worldP.z*87.),sin(worldP.x*92.)*cos(worldP.y*83.)*sin(worldP.z*87.),sin(worldP.x*92.)*sin(worldP.y*83.)*cos(worldP.z*87.));
-      normal=normalize(normal+mat3(viewMatrix)*rough*.27);
+      normal=normalize(normal+mat3(viewMatrix)*rough*.1);
       float diffuse=max(dot(normal,light),0.);
       float rim=pow(1.-max(normal.z,0.),3.);
       float grain=sin(worldP.x*92.)*sin(worldP.y*83.)*sin(worldP.z*87.);
-      vec3 col=vColor*(.29+.80*diffuse)*vShade*(.93+grain*.12)+vColor*.035*rim;
-      float fog=smoothstep(24.,64.,-p.z);col=mix(col,vec3(.004,.009,.014),fog*.82);
+      vec3 col=vColor*(.16+.88*diffuse)*vShade*(.96+grain*.05)+vColor*.045*rim;
+      float fog=smoothstep(18.,48.,-p.z);col=mix(col,vec3(.002,.007,.009),fog*.87);
       gl_FragColor=vec4(col,1.);
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
@@ -89,45 +93,45 @@ async function start() {
       if(!this.r.length)return;
       const geo=new THREE.InstancedBufferGeometry();
       geo.setAttribute('position',new THREE.Float32BufferAttribute([-1,-1,0,1,-1,0,1,1,0,-1,1,0],3));geo.setIndex([0,1,2,0,2,3]);
-      for(const [name,arr,size] of [['aCenter',this.c,3],['aOffset',this.o,3],['aRadius',this.r,1],['aColor',this.colors,3],['aSeed',this.seeds,1],['aShade',this.shades,1]])geo.setAttribute(name,new THREE.InstancedBufferAttribute(new Float32Array(arr),size));
+      for(const [name,arr,size] of [['aCenter',this.c,3],['aOffset',this.o,3],['aRadius',this.r,1],['aColor',this.colors,3],['aSeed',this.seeds,1],['aShade',this.shades,1]]){
+        const data=new Float32Array(arr.length);let index=0;
+        // Interleave atom subsets so lower detail thins every molecule equally.
+        for(let subset=0;subset<3;subset++)for(let i=subset;i<this.r.length;i+=3)for(let j=0;j<size;j++)data[index++]=arr[i*size+j];
+        geo.setAttribute(name,new THREE.InstancedBufferAttribute(data,size));
+      }
       geo.instanceCount=this.r.length;
-      const mat=new THREE.ShaderMaterial({vertexShader:beadVertex,fragmentShader:beadFragment,uniforms:{uTime:timeUniform,uCut:cutUniform}});
-      const mesh=new THREE.Mesh(geo,mat);mesh.frustumCulled=false;parent.add(mesh);materials.push(mat);metrics.sphereCount+=this.r.length;return mesh;
+      const mat=new THREE.ShaderMaterial({vertexShader:beadVertex,fragmentShader:beadFragment,uniforms:{uTime:timeUniform,uCut:cutUniform,uRadiusScale:{value:1}}});
+      const mesh=new THREE.Mesh(geo,mat);mesh.frustumCulled=false;mesh.userData.fullCount=this.r.length;beadMeshes.push(mesh);parent.add(mesh);materials.push(mat);metrics.sphereCount+=this.r.length;return mesh;
     }
   }
   function ball(batch, center, radii, color, count=100, phase=-1){
-    const base=Math.min(...radii);
-    const lobes=[{o:[0,0,0],r:base*.82}];
-    for(let j=0;j<6;j++){
-      const axis=Math.floor(j/2),sign=j%2?1:-1,off=[0,0,0];off[axis]=radii[axis]*.43*sign;
-      lobes.push({o:off,r:base*(.61+.06*Math.sin(j*2.1))});
-    }
-    for(const l of lobes)batch.add(center,l.o,l.r,color,phase,.94);
-    for(let i=0;i<count;i++){
-      const l=lobes[i%lobes.length],y=1-2*((i*.61803398875)%1),r=Math.sqrt(1-y*y),a=i*2.399963229728653;
-      const normal=[r*Math.cos(a),y,r*Math.sin(a)];
-      const off=normal.map((v,j)=>l.o[j]+v*l.r*.98);
-      if(lobes.some(other=>other!==l&&Math.hypot(...off.map((v,j)=>v-other.o[j]))<other.r*.96))continue;
-      batch.add(center,off,base*range(.065,.10),color,phase,range(.86,1.06));
+    const index=count>200?3:count>130?2:random()<.55?0:1;
+    const atoms=templates[index].atoms;
+    const rotation=new THREE.Quaternion().setFromEuler(new THREE.Euler(range(0,6.28),range(0,6.28),range(0,6.28)));
+    const v=new THREE.Vector3();
+    const scale=Math.cbrt(radii[0]*radii[1]*radii[2])*1.45;
+    for(let i=0;i<atoms.length;i+=5){
+      v.set(atoms[i],atoms[i+1],atoms[i+2]).applyQuaternion(rotation);
+      batch.add(center,[v.x*radii[0]*1.6,v.y*radii[1]*1.6,v.z*radii[2]*1.6],atoms[i+3]*scale*1.05,color,phase,.66+.34*atoms[i+4]);
     }
   }
   function chain(batch, points, radius, color){for(const p of points)batch.add(p,[0,0,0],radius*range(.8,1.15),color);}
-  function surf(x,z,base){return base-.011*x*x-.009*z*z;}
+  function surf(x,z,base){return base-.018*x*x-.012*z*z;}
   const membraneBeads = new Beads(), wallBeads=new Beads(), periplasm=new Beads();
-  for(let x=-21;x<21;x+=.19)for(let z=-12;z<4;z+=.20){
-    const xx=x+range(-.06,.06),zz=z+range(-.06,.06);
+  for(let x=-21;x<21;x+=.115)for(let z=-12;z<4;z+=.12){
+    const xx=x+range(-.035,.035),zz=z+range(-.035,.035);
     const gap=Math.hypot(xx-2.1,zz-.1)<1.15;
     if(!gap){
-      membraneBeads.add([xx,surf(xx,zz,1.85),zz],[0,0,0],range(.075,.105),'#93d4d3');
-      membraneBeads.add([xx,surf(xx,zz,1.60),zz],[0,0,0],.07,'#589c9f');
-      membraneBeads.add([xx,surf(xx,zz,5.0),zz],[0,0,0],range(.075,.11),'#a6cc55');
-      membraneBeads.add([xx,surf(xx,zz,4.75),zz],[0,0,0],.07,'#5e873e');
+      membraneBeads.add([xx,surf(xx,zz,1.85)+range(-.035,.035),zz],[0,0,0],range(.045,.065),'#a0d3cb');
+      membraneBeads.add([xx,surf(xx,zz,1.58),zz],[0,0,0],.046,'#639e9e');
+      membraneBeads.add([xx,surf(xx,zz,5.0)+range(-.035,.035),zz],[0,0,0],range(.045,.066),'#a6cc55');
+      membraneBeads.add([xx,surf(xx,zz,4.73),zz],[0,0,0],.046,'#638a41');
     }
-    if(random()<.19&&!gap)wallBeads.add([xx,surf(xx,zz,4.02),zz],[0,0,0],range(.07,.11),'#c5c7a2');
+    if(random()<.45&&!gap)wallBeads.add([xx,surf(xx,zz,4.02)+range(-.045,.045),zz],[0,0,0],range(.04,.075),'#c9c7a8');
   }
-  for(let i=0;i<330;i++){
+  for(let i=0;i<500;i++){
     const x=range(-21,21),z=range(-12,4);if(Math.hypot(x-2.1,z-.1)<2.4)continue;
-    const y=surf(x,z,range(2.45,3.35));ball(periplasm,[x,y,z],[range(.25,.5),range(.22,.4),range(.25,.5)],random()<.4?'#b0a467':'#c6b06b',32);
+    const y=surf(x,z,range(2.45,3.35));ball(periplasm,[x,y,z],[range(.3,.55),range(.25,.45),range(.3,.55)],random()<.4?'#b7a265':'#cdb57a',32);
   }
   membraneBeads.build(envelope);wallBeads.build(envelope);periplasm.build(envelope);
   function material(color){
@@ -147,44 +151,67 @@ async function start() {
   }
   ribbon(1.7,'#64b1b7');ribbon(4.85,'#7e9d46');
   const strands=new Beads();
-  for(let i=0;i<330;i++){
+  for(let i=0;i<620;i++){
     const x=range(-21,21),z=range(-12,4);if(Math.hypot(x-2.1,z-.1)<2)continue;
     const length=range(.5,2.5),bend=range(-.4,.4),phase=range(0,7);
-    for(let s=0;s<length;s+=.105){const xx=x+bend*s+Math.sin(s*3+phase)*.05;strands.add([xx,surf(x,z,5.1)+s,z+Math.sin(s*1.7+phase)*.12],[0,0,0],.055,s>length-.14?'#ded69b':'#becd75');}
+    for(let s=0;s<length;s+=.065){const xx=x+bend*s+Math.sin(s*3+phase)*.05;strands.add([xx,surf(x,z,5.1)+s,z+Math.sin(s*1.7+phase)*.12],[0,0,0],.037,s>length-.14?'#ded69b':'#becd75');}
+    for(let j=0;j<3;j++){const height=length*range(.45,.9),side=j%2?1:-1;for(let t=0;t<.45;t+=.06)strands.add([x+bend*height+side*t*.6,surf(x,z,5.1)+height+t,z+Math.sin(height*1.7+phase)*.12+t*.3],[0,0,0],.029,'#c5d283');}
   }strands.build(envelope);
 
   const crowd = new Beads();
-  // A jittered 3D packing gives depth without expensive pairwise simulation.
-  for(let ix=0;ix<30;ix++)for(let iy=0;iy<9;iy++)for(let iz=0;iz<9;iz++){
-    if(random()<.24)continue;
-    const x=-20+ix*1.38+range(-.3,.3),z=-11+iz*1.65+range(-.3,.3),y=-11.5+iy*1.45+range(-.3,.3);
+  // Rejection packing prevents the visible rows and repeated spacing of a grid.
+  const packing=new Map();
+  for(let attempt=0;attempt<10500;attempt++){
+    const x=range(-20,20),z=range(-11,3.8),y=range(-13,1.2);
     if(y>surf(x,z,.83))continue;
-    if(Math.hypot(x-2.1,z-.1)<3.2&&y>-4.3)continue;
-    const scale=range(.36,.68),col=palette[Math.floor(random()*palette.length)],phase=range(0,50);
+    if(Math.hypot(x-2.1,z-.1)<2.95&&y>-4.1)continue;
+    const scale=range(.38,.83),cell=[x,y,z].map(v=>Math.floor(v/2));let overlaps=false;
+    for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++)for(let c=-1;c<=1;c++){
+      for(const p of packing.get([cell[0]+a,cell[1]+b,cell[2]+c].join(','))??[]){if(Math.hypot(x-p[0],y-p[1],z-p[2])<(scale+p[3])*1.30)overlaps=true;}
+    }
+    if(overlaps)continue;
+    const k=cell.join(',');if(!packing.has(k))packing.set(k,[]);packing.get(k).push([x,y,z,scale]);
+    const col=palette[Math.floor(random()*palette.length)],phase=range(0,50);
     const radii=[scale*range(.8,1.25),scale*range(.75,1.2),scale*range(.8,1.2)];
-    ball(crowd,[x,y,z],radii,col,60,phase);
-    if(random()<.42)ball(crowd,[x+scale*.55,y+scale*.28,z],[scale*.64,scale*.8,scale*.7],col,30,phase);
+    ball(crowd,[x,y,z],radii,col,scale>.72?210:60,phase);
   }
   const crowdMesh=crowd.build(proteins);
 
   // The hero motor has an independent rotor. Support assemblies remain anchored.
   const rotor = new THREE.Group();rotor.position.set(2.1,0,.1);motor.add(rotor);
   const fixed = new THREE.Group();fixed.position.copy(rotor.position);motor.add(fixed);
-  const yellow=material('#dbb631'),gold=material('#b99c4c');
+  const yellow=material('#ceb427'),gold=material('#b59b5c');
   function tube(parent,r1,r2,h,y,mat){const mesh=new THREE.Mesh(new THREE.CylinderGeometry(r1,r2,h,72,1,true),mat);mesh.position.y=y;parent.add(mesh);return mesh;}
   function torus(parent,r,t,y,mat){const mesh=new THREE.Mesh(new THREE.TorusGeometry(r,t,12,90),mat);mesh.rotation.x=Math.PI/2;mesh.position.y=y;parent.add(mesh);return mesh;}
   tube(rotor,2.32,2.32,1.35,-1.05,yellow);torus(rotor,2.24,.17,-1.75,yellow);torus(rotor,2.24,.18,-.35,yellow);
-  tube(rotor,.5,.5,6.8,2.5,gold);torus(rotor,.88,.2,1.9,yellow);torus(fixed,1.03,.22,4.02,gold);torus(fixed,1.13,.26,4.97,gold);
+  tube(rotor,.27,.27,6.8,2.5,gold);torus(rotor,.72,.16,1.9,yellow);torus(fixed,1.03,.22,4.02,gold);torus(fixed,1.13,.26,4.97,gold);
   const rotorBeads=new Beads(),supportBeads=new Beads();
-  for(let i=0;i<92;i++){
-    const a=i*Math.PI*2/92;for(let y=-1.7;y<-.28;y+=.12){rotorBeads.add([Math.cos(a)*2.31,y,Math.sin(a)*2.31],[0,0,0],range(.07,.095),'#e1c044');}
-    for(let r=.58;r<2.4;r+=.14){rotorBeads.add([Math.cos(a)*r,-1.73,Math.sin(a)*r],[0,0,0],.075,'#e0c247');rotorBeads.add([Math.cos(a)*r,-.35,Math.sin(a)*r],[0,0,0],.075,'#ead061');}
+  for(let i=0;i<34;i++){
+    const a=i*Math.PI*2/34;
+    ball(rotorBeads,[Math.cos(a)*2.28,-1.04,Math.sin(a)*2.28],[.25,.68,.25],'#e6c939',65);
   }
-  for(let y=-.2;y<6.2;y+=.13)for(let a=0;a<Math.PI*2;a+=.3)rotorBeads.add([Math.cos(a+y*.8)*.5,y,Math.sin(a+y*.8)*.5],[0,0,0],.09,'#c6ac69');
+  for(let i=0;i<46000;i++){
+    const a=range(0,Math.PI*2),r=Math.sqrt(range(i%2?3.35:.42,5.6));
+    const y=(i%2?-.34:-1.76)+range(-.025,.025);
+    rotorBeads.add([Math.cos(a)*r,y,Math.sin(a)*r],[0,0,0],range(.021,.038),'#e4cc40',-1,range(.83,1.07));
+  }
+  for(let i=0;i<24000;i++){
+    const a=range(0,6.283),y=range(-1.76,-.29),r=2.32+range(-.03,.03);
+    rotorBeads.add([Math.cos(a)*r,y,Math.sin(a)*r],[0,0,0],range(.023,.038),'#dfc133');
+  }
+  for(let i=0;i<16000;i++){
+    const a=range(0,6.283),y=range(-1.67,-.36),r=1.84+range(-.025,.025);
+    rotorBeads.add([Math.cos(a)*r,y,Math.sin(a)*r],[0,0,0],range(.023,.037),'#ceb52e',-1,.72);
+  }
+  for(let y=-1;y<6.2;y+=.055)for(let a=0;a<Math.PI*2;a+=.15)rotorBeads.add([Math.cos(a+y*.8)*.275,y,Math.sin(a+y*.8)*.275],[0,0,0],.034,'#cbb478');
+  function coatRing(batch,r,t,y,color){
+    for(let i=0;i<6500;i++){const a=range(0,6.283),b=range(0,6.283),rr=r+Math.cos(b)*t;batch.add([Math.cos(a)*rr,y+Math.sin(b)*t,Math.sin(a)*rr],[0,0,0],range(.025,.042),color);}
+  }
+  coatRing(rotorBeads,2.24,.17,-1.75,'#e1c42e');coatRing(rotorBeads,2.24,.18,-.35,'#e5cb3d');coatRing(supportBeads,1.03,.22,4.02,'#c5ad72');coatRing(supportBeads,1.13,.26,4.97,'#d6bd86');coatRing(rotorBeads,.72,.16,1.9,'#ddc34a');
   for(let i=0;i<11;i++){
     const a=i*Math.PI*2/11,x=Math.cos(a)*2.78,z=Math.sin(a)*2.78;
-    ball(supportBeads,[x,.25,z],[.42,.48,.36],'#ce83b8',145);
-    for(let y=.65;y<3.3;y+=.13){supportBeads.add([x,y,z],[0,0,0],.073,'#c9bc5d');supportBeads.add([x+.12,y,z],[0,0,0],.065,'#c2b452');}
+    ball(supportBeads,[x,.05,z],[.40,.51,.36],'#d68cbb',145);
+    for(let y=.65;y<3.3;y+=.055){supportBeads.add([x,y,z],[0,0,0],.037,'#c9bc5d');supportBeads.add([x+.075,y,z],[0,0,0],.034,'#c2b452');}
     ball(supportBeads,[x,3.25,z],[.3,.24,.3],'#d5bd65',65);
   }
   ball(rotorBeads,[0,-3.65,0],[.62,.4,.62],'#d77b33',250);
@@ -196,23 +223,36 @@ async function start() {
   const hookPoints=[];for(let i=0;i<=100;i++){const t=i/100;hookPoints.push(new THREE.Vector3(Math.sin(t*3.1)*.85,6+t*8.5,Math.sin(t*4)*.4));}
   const hookCurve=new THREE.CatmullRomCurve3(hookPoints);
   const hook=new THREE.Mesh(new THREE.TubeGeometry(hookCurve,150,.35,12,false),material('#c8b37a'));rotor.add(hook);
-  for(let i=0;i<190;i++){
-    const p=hookCurve.getPoint(i/189);for(let j=0;j<10;j++){const a=j*Math.PI*2/10+i*.32;rotorBeads.add([p.x+Math.cos(a)*.35,p.y,p.z+Math.sin(a)*.35],[0,0,0],.065,'#d6c18c');}
+  for(let i=0;i<350;i++){
+    const p=hookCurve.getPoint(i/349);for(let j=0;j<32;j++){const a=j*Math.PI*2/32+i*.32;rotorBeads.add([p.x+Math.cos(a)*.35,p.y,p.z+Math.sin(a)*.35],[0,0,0],range(.023,.037),'#d6c18c');}
   }
   rotorBeads.build(rotor);supportBeads.build(fixed);
+
+  const machinery=new Beads();
+  for(const [x,z] of [[-8,1],[-10,-2],[8,-1],[11,-4]]){
+    const y=surf(x,z,1.6);
+    ball(machinery,[x,y-.3,z],[.36,.32,.4],'#69c7b2',145);
+    for(let arm=0;arm<6;arm++){
+      const a=arm*Math.PI/3;
+      for(let j=0;j<6;j++){const t=j/5;ball(machinery,[x+Math.cos(a)*(.15+t*.35),y-.45-t*2.8,z+Math.sin(a)*(.15+t*.35)],[.13,.35,.13],'#71c4b5',32);}
+    }
+    ball(machinery,[x,y-3.5,z],[.6,.48,.65],'#66b7ae',210);
+  }machinery.build(proteins);
 
   // Local SDF proteins: each cube bounds a blended molecular field; rays never scan the entire cell.
   const sdfVertex=`varying vec3 vLocal;void main(){vLocal=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`;
   const sdfFragment=`
     uniform float uTime,uCut;uniform vec3 uColor;uniform mat4 uInvModel,modelMatrix,projectionMatrix;
     varying vec3 vLocal;
+    float hash3(vec3 p){return fract(sin(dot(p,vec3(127.1,311.7,74.7)))*43758.5453);}
+    float noise3(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(mix(hash3(i),hash3(i+vec3(1,0,0)),f.x),mix(hash3(i+vec3(0,1,0)),hash3(i+vec3(1,1,0)),f.x),f.y),mix(mix(hash3(i+vec3(0,0,1)),hash3(i+vec3(1,0,1)),f.x),mix(hash3(i+vec3(0,1,1)),hash3(i+vec3(1,1,1)),f.x),f.y),f.z);}
     float sm(float a,float b){float h=max(.28-abs(a-b),0.)/.28;return min(a,b)-h*h*.07;}
     float field(vec3 p){
       float d=length(p*vec3(.95,1.15,1.05))-.68;
       d=sm(d,length(p-vec3(.45,.12,.12))-.43);
       d=sm(d,length(p-vec3(-.38,.15,-.14))-.46);
       d=sm(d,length(p-vec3(.05,.47,-.08))-.4);
-      return d+(sin(p.x*24.)*sin(p.y*27.)*sin(p.z*23.))*.017;
+      return d+(noise3(p*32.)-.5)*.025+(noise3(p*61.)-.5)*.01;
     }
     void main(){
       vec3 ro=(uInvModel*vec4(cameraPosition,1.)).xyz,rd=normalize(vLocal-ro);
@@ -230,8 +270,8 @@ async function start() {
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
     }`;
-  for(const [x,y,z,scale] of [[-5,-.1,1.1,.8],[-7,-1,0,1],[-4,-4,2.2,.9]]){
-    const mat=new THREE.ShaderMaterial({vertexShader:sdfVertex,fragmentShader:sdfFragment,uniforms:{uTime:timeUniform,uCut:cutUniform,uColor:{value:new THREE.Color('#90c953')},uInvModel:{value:new THREE.Matrix4()}}});
+  for(const [x,y,z,scale] of [[-5,-.1,1.1,.5],[-7,-1,0,.6],[-4,-4,2.2,.55]]){
+    const mat=new THREE.ShaderMaterial({vertexShader:sdfVertex,fragmentShader:sdfFragment,uniforms:{uTime:timeUniform,uCut:cutUniform,uColor:{value:new THREE.Color('#92bb5b')},uInvModel:{value:new THREE.Matrix4()}}});
     const mesh=new THREE.Mesh(new THREE.BoxGeometry(2.4,2.4,2.4),mat);mesh.position.set(x,y,z);mesh.scale.setScalar(scale);proteins.add(mesh);
     mesh.onBeforeRender=()=>{mesh.updateMatrixWorld();mat.uniforms.uInvModel.value.copy(mesh.matrixWorld).invert();};animated.push(mesh);materials.push(mat);
     const stem=new THREE.Mesh(new THREE.CylinderGeometry(.1,.1,1.2,8),material('#85b557'));stem.position.set(x,y+.8,z);proteins.add(stem);
@@ -251,44 +291,55 @@ async function start() {
   const target=new THREE.WebGLRenderTarget(1,1,{minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter,depthBuffer:true});
   target.depthTexture=new THREE.DepthTexture(1,1,THREE.UnsignedIntType);
   const postScene=new THREE.Scene(),postCamera=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
-  const postMaterial=new THREE.ShaderMaterial({depthTest:false,depthWrite:false,uniforms:{tColor:{value:target.texture},tDepth:{value:target.depthTexture},uSize:{value:new THREE.Vector2(1,1)},uAO:{value:1},uNear:{value:camera.near},uFar:{value:camera.far}},vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}',fragmentShader:`
-    uniform sampler2D tColor,tDepth;uniform vec2 uSize;uniform float uAO,uNear,uFar;varying vec2 vUv;
+  const postMaterial=new THREE.ShaderMaterial({depthTest:false,depthWrite:false,uniforms:{tColor:{value:target.texture},tDepth:{value:target.depthTexture},uSize:{value:new THREE.Vector2(1,1)},uProj:{value:new THREE.Vector2(1,1)},uFocus:{value:17},uAO:{value:1},uNear:{value:camera.near},uFar:{value:camera.far}},vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=vec4(position.xy,0.,1.);}',fragmentShader:`
+    uniform sampler2D tColor,tDepth;uniform vec2 uSize,uProj;uniform float uAO,uNear,uFar,uFocus;varying vec2 vUv;
     float depth(vec2 p){float d=texture2D(tDepth,p).r;return 2.*uNear*uFar/(uFar+uNear-(d*2.-1.)*(uFar-uNear));}
+    vec3 viewPos(vec2 uv,float d){return vec3((uv*2.-1.)*uProj*d,-d);}
     void main(){
       vec3 col=texture2D(tColor,vUv).rgb;float d=depth(vUv),occ=0.;
+      vec3 p=viewPos(vUv,d),n=normalize(cross(dFdx(p),dFdy(p)));
       if(d<uFar*.98&&uAO>.5){
-        for(int i=0;i<12;i++){
-          float a=float(i)*2.39996;float r=4.+float(i%4)*5.;
+        for(int i=0;i<24;i++){
+          float a=float(i)*2.39996;float r=4.+float(i%6)*6.;
           vec2 uv=clamp(vUv+vec2(cos(a),sin(a))*r/uSize,vec2(0.),vec2(1.));
-          float diff=d-depth(uv);occ+=smoothstep(.025,.18,diff)*(1.-smoothstep(.6,1.8,diff));
+          vec3 delta=viewPos(uv,depth(uv))-p;float len=length(delta);
+          occ+=max(dot(n,delta/max(len,.001))-.04,0.)*(1.-smoothstep(.25,2.7,len));
         }
       }
-      col*=1.-occ/12.*.85;
-      float vignette=1.-.20*pow(length((vUv-.5)*vec2(1.,.8)),1.5);col*=vignette;
+      float blur=clamp((d-uFocus-2.)/11.,0.,1.)*1.8;
+      if(blur>.1){vec3 sum=col;float weight=1.;for(int j=0;j<6;j++){float a=float(j)*1.0472;vec2 q=vUv+vec2(cos(a),sin(a))*blur/uSize;float w=step(abs(depth(q)-d),1.);sum+=texture2D(tColor,q).rgb*w;weight+=w;}col=sum/weight;}
+      col*=pow(max(1.-occ/24.*1.9,.15),1.15);
+      float vignette=1.-.32*pow(length((vUv-.5)*vec2(1.,.8)),1.5);col*=vignette;
       gl_FragColor=vec4(col,1.);
       #include <colorspace_fragment>
     }`});
   postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),postMaterial));
 
   const views={
-    motor:{position:[10,8,20],target:[.8,1.4,.2],title:'The flagellar motor',text:'A rotary machine spanning the cell envelope. The rotor turns the shaft and external filament while its supports stay anchored.'},
+    motor:{position:[5,3,10.6],target:[1.3,-.7,.4],title:'The flagellar motor',text:'A rotary machine spanning the cell envelope. The rotor turns the shaft and external filament while its supports stay anchored.'},
     envelope:{position:[9,13,32],target:[-2,3,-2],title:'A layered boundary',text:'Two membranes and a cell-wall layer form the envelope. The space between them contains a crowded collection of proteins.'},
     interior:{position:[3,3,22],target:[-5,-4,-1],title:'A crowded interior',text:'Proteins occupy a dense, three-dimensional landscape. Their gentle drift is illustrative; this is not an atom-level physics simulation.'}
   };
   let transition=null;
   function setView(name,instant=false){
     state.view=name;const v=views[name];
-    if(instant){camera.position.fromArray(v.position);controls.target.fromArray(v.target);controls.update();}
-    else transition={from:camera.position.clone(),targetFrom:controls.target.clone(),to:new THREE.Vector3(...v.position),targetTo:new THREE.Vector3(...v.target),t:0};
+    const aim=new THREE.Vector3(...v.target);if(innerWidth<=760&&name==='motor')aim.x+=1.1;
+    if(instant){camera.position.fromArray(v.position);controls.target.copy(aim);controls.update();}
+    else transition={from:camera.position.clone(),targetFrom:controls.target.clone(),to:new THREE.Vector3(...v.position),targetTo:aim,t:0};
     document.querySelectorAll('[data-view]').forEach(b=>{b.classList.toggle('active',b.dataset.view===name);b.setAttribute('aria-pressed',String(b.dataset.view===name));});
     $('info-title').textContent=v.title;$('info-text').textContent=v.text;
+    document.querySelector('h1').textContent={motor:'The bacterial flagellar motor',envelope:'A layered, living boundary',interior:'Inside the molecular crowd'}[name];
+    document.querySelector('.scene-heading p').textContent={motor:'Molecular machinery, in motion.',envelope:'Two membranes. A world between them.',interior:'A dense landscape of folded proteins.'}[name];
   }
   setView('motor',true);
-  controls.addEventListener('start',()=>{transition=null;});
-  document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>setView(b.dataset.view)));
-  function playUI(){$('play-text').textContent=state.paused?'Resume simulation':'Pause simulation';$('play-symbol').textContent=state.paused?'▶':'Ⅱ';$('play').setAttribute('aria-label',state.paused?'Resume simulation':'Pause simulation');}
+  function stopTour(){state.tour=false;$('tour').setAttribute('aria-pressed','false');}
+  controls.addEventListener('start',()=>{transition=null;stopTour();});
+  let tourElapsed=0,tourIndex=0;
+  $('tour').onclick=()=>{state.tour=!state.tour;$('tour').setAttribute('aria-pressed',String(state.tour));tourElapsed=0;tourIndex=0;if(state.tour){state.paused=false;playUI();setView('motor');}};
+  document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>{stopTour();setView(b.dataset.view);}));
+  function playUI(){$('play-text').textContent=state.paused?'Resume simulation':'Pause simulation';$('play-symbol').textContent=state.paused?'▶':'Ⅱ';$('play').setAttribute('aria-label',state.paused?'Resume simulation':'Pause simulation');$('dock-play').textContent=state.paused?'▶':'Ⅱ';$('dock-play').setAttribute('aria-label',state.paused?'Resume simulation':'Pause simulation');}
   function togglePlay(){state.paused=!state.paused;playUI();}
-  $('play').onclick=togglePlay;playUI();
+  $('play').onclick=togglePlay;$('dock-play').onclick=togglePlay;playUI();
   function slider(el){el.style.background=`linear-gradient(to right,var(--accent) ${(el.value-el.min)/(el.max-el.min)*100}%,#35413e 0)`;}
   for(const id of ['speed','cut'])slider($(id));
   $('speed').oninput=e=>{state.speed=+e.target.value;$('speed-value').value=state.speed.toFixed(1)+'×';slider(e.target);};
@@ -297,17 +348,20 @@ async function start() {
   $('reverse').onclick=()=>{state.direction*=-1;$('direction').textContent=state.direction===1?'CCW':'CW';};
   for(const [id,group] of [['show-motor',motor],['show-envelope',envelope],['show-proteins',proteins],['show-particles',particles]])$(id).onchange=e=>{group.visible=e.target.checked;};
   $('ao').onchange=e=>{state.ao=e.target.checked;postMaterial.uniforms.uAO.value=state.ao?1:0;};
-  $('annotations').onchange=e=>{state.labels=e.target.checked;$('labels').style.display=state.labels?'':'none';};
-  $('reset').onclick=()=>setView('motor');
+  $('annotations').onchange=e=>{state.labels=e.target.checked;$('labels').style.display=state.labels?'block':'none';};
+  $('reset').onclick=()=>{stopTour();setView('motor');};
   function togglePanel(){document.body.classList.toggle('panel-hidden');$('toggle-panel').setAttribute('aria-expanded',String(!document.body.classList.contains('panel-hidden')));resize();}
   $('toggle-panel').onclick=togglePanel;
   if(innerWidth<=760){document.body.classList.add('panel-hidden');$('toggle-panel').setAttribute('aria-expanded','false');}
-  document.addEventListener('keydown',e=>{if(/INPUT|SELECT|BUTTON|TEXTAREA/.test(e.target.tagName))return;if(e.code==='Space'){e.preventDefault();togglePlay();}if(e.key.toLowerCase()==='r')setView('motor');if(e.key.toLowerCase()==='h')togglePanel();});
+  document.addEventListener('keydown',e=>{if(/INPUT|SELECT|BUTTON|TEXTAREA/.test(e.target.tagName))return;if(e.code==='Space'){e.preventDefault();togglePlay();}if(e.key.toLowerCase()==='r'){stopTour();setView('motor');}if(e.key.toLowerCase()==='h')togglePanel();});
   function resize(){
     const bounds=$('viewport').getBoundingClientRect();
     const scale={low:.65,balanced:1,high:1.45}[state.quality];
     renderer.setPixelRatio(Math.min(devicePixelRatio,1.5)*scale);renderer.setSize(bounds.width,bounds.height);camera.aspect=bounds.width/bounds.height;camera.fov=bounds.width<600?55:40;camera.updateProjectionMatrix();
     const size=renderer.getDrawingBufferSize(new THREE.Vector2());target.setSize(size.x,size.y);postMaterial.uniforms.uSize.value.copy(size);
+    const tan=Math.tan(THREE.MathUtils.degToRad(camera.fov*.5));postMaterial.uniforms.uProj.value.set(tan*camera.aspect,tan);
+    metrics.activeSphereCount=0;
+    for(const mesh of beadMeshes){mesh.geometry.instanceCount=state.quality==='low'?Math.ceil(mesh.userData.fullCount/3):mesh.userData.fullCount;mesh.material.uniforms.uRadiusScale.value=state.quality==='low'?1.35:1;metrics.activeSphereCount+=mesh.geometry.instanceCount;}
   }
   $('quality').onchange=e=>{state.quality=e.target.value;resize();};window.addEventListener('resize',resize);resize();
   const anchors={motor:new THREE.Vector3(4.9,-1.3,1.4),outer:new THREE.Vector3(-8,4.5,1.5),inner:new THREE.Vector3(9,.7,1.6),cyto:new THREE.Vector3(-6,-6,2)};
@@ -326,12 +380,12 @@ async function start() {
   let last=performance.now(),sample=last,frameCount=0,angle=0;
   function frame(now){
     const dt=Math.min((now-last)/1000,.05);last=now;
-    if(!state.paused&&!document.hidden){state.time+=dt*state.speed;angle+=dt*state.speed*state.direction*.65;}
+    if(!state.paused&&!document.hidden){state.time+=dt*state.speed;angle+=dt*state.speed*state.direction*.65;if(state.tour){tourElapsed+=dt;if(tourElapsed>11){tourElapsed=0;tourIndex=(tourIndex+1)%3;setView(['motor','envelope','interior'][tourIndex]);}}}
     rotor.rotation.y=angle;timeUniform.value=state.time;
     for(let i=0;i<animated.length;i++){animated[i].rotation.y=Math.sin(state.time*.2+i)*.17;animated[i].rotation.z=Math.sin(state.time*.3+i)*.05;}
     updateParticles();
     if(transition){transition.t=Math.min(transition.t+dt/1.1,1);const t=transition.t*tEase(transition.t);camera.position.lerpVectors(transition.from,transition.to,t);controls.target.lerpVectors(transition.targetFrom,transition.targetTo,t);if(transition.t===1)transition=null;}
-    controls.update();renderer.setRenderTarget(target);renderer.render(scene,camera);metrics.drawCalls=renderer.info.render.calls;renderer.setRenderTarget(null);renderer.render(postScene,postCamera);labels();
+    controls.update();postMaterial.uniforms.uFocus.value=camera.position.distanceTo(controls.target);renderer.setRenderTarget(target);renderer.render(scene,camera);metrics.drawCalls=renderer.info.render.calls;renderer.setRenderTarget(null);renderer.render(postScene,postCamera);labels();
     frameCount++;metrics.frames++;
     if(now-sample>1000){metrics.fps=Math.round(frameCount*1000/(now-sample));$('fps').textContent=metrics.fps+' FPS';frameCount=0;sample=now;const seconds=Math.floor(state.time);$('clock').textContent=String(Math.floor(seconds/60)).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0');}
     if(!metrics.ready){metrics.ready=true;$('loading').classList.add('hidden');$('render-status').textContent='MOLECULAR LANDSCAPE';}
