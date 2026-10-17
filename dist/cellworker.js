@@ -3,7 +3,7 @@
 // outer-membrane proteins. Deterministic per tile, so revisiting a place rebuilds the same molecules.
 //
 // Detail levels: 0 = 96-bead proteins + DNA double helix, 1 = 48 beads, 2 = 12 beads, 3 = one bead per molecule.
-let P = null, pick = {}, densities = null, dna = null, dnaBuckets = null, atlas = null, napSpecies = [];
+let P = null, pick = {}, densities = null, dna = null, dnaBuckets = null, atlas = null, napSpecies = [], blockers = [], discs = [];
 const TOP = -35, BOTTOM = -175, MID = -105, TILE = 12;
 const pinch = y => 3.5 * Math.exp(-(((y - MID) / 7) ** 2));
 const radiusAt = (r, y) => (y < TOP && y > BOTTOM ? r - pinch(y) : r);
@@ -13,7 +13,11 @@ const nucleoids = [[0, -72, 0], [0, -138, 0]], nucR = [17, 26, 17];
 const inNucleoid = (x, y, z, s = 1) => nucleoids.some(c => ((x - c[0]) / nucR[0]) ** 2 + ((y - c[1]) / nucR[1]) ** 2 + ((z - c[2]) / nucR[2]) ** 2 < s * s);
 const axisDistance = (x, y, z) => { const yy = Math.min(TOP, Math.max(BOTTOM, y)); return Math.hypot(x, y - yy, z); };
 const inCytoplasm = (x, y, z, margin) => axisDistance(x, y, z) < radiusAt(36.3, y) - margin;
-const SPECIAL = { ribosome: 65000, dna: 65001, lipid: 65002, lps: 65003 }, PATCH = 1.6;
+const SPECIAL = { ribosome: 65000, dna: 65001, lipid: 65002, lps: 65003, wall: 65004, imLipid: 65005 }, PATCH = 1.6;
+// Hand-built machines in the top window: cytoplasm spheres [x,y,z,r] and the motor column keep streamed molecules out;
+// membrane discs [x,z,r] (porins, efflux pumps, motor bushings) keep lipids out.
+const blocked = (x, y, z) => (Math.hypot(x - 2.1, z - .1) < 3.55 && y > -4.1) || blockers.some(b => (x - b[0]) ** 2 + (y - b[1]) ** 2 + (z - b[2]) ** 2 < b[3] * b[3]);
+const inDisc = (x, y, z) => y > -16 && discs.some(d => (x - d[0]) ** 2 + (z - d[1]) ** 2 < d[2] * d[2]);
 
 function rng(seed) { let s = seed >>> 0 || 1; return () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return (s >>> 0) / 4294967296; }; }
 function hash(a, b, c) { let h = 2166136261 ^ a; h = Math.imul(h ^ b, 16777619); h = Math.imul(h ^ c, 16777619); return h >>> 0; }
@@ -29,9 +33,9 @@ function randomQuat(r) { const u1 = r(), u2 = r() * 6.2832, u3 = r() * 6.2832, a
 const hex = c => [parseInt(c.slice(1, 3), 16) / 255, parseInt(c.slice(3, 5), 16) / 255, parseInt(c.slice(5, 7), 16) / 255];
 
 onmessage = ({ data }) => {
-  if (data.type === 'init') { init(data.proteome); return; }
+  if (data.type === 'init') { blockers = data.blockers || []; discs = data.discs || []; init(data.proteome); return; }
   if (data.type === 'tile') postTile(data);
-  if (data.type === 'surface') postSurface(data);
+  if (data.type === 'surface') postEnvelope(data);
 };
 
 function init(proteome) {
@@ -61,13 +65,13 @@ function init(proteome) {
   // Surface atlas: patch centres on an even grid (rings × columns on the body, golden-angle spirals on the caps) with outward
   // normals, so square patches of lipids tile the outer membrane without gaps. Bucketed in 12-unit cubes.
   atlas = new Map();
-  const add = (p, n) => { if (inSlab(...p)) return; const key = [Math.floor(p[0] / TILE), Math.floor(p[1] / TILE), Math.floor(p[2] / TILE)].join(','); if (!atlas.has(key)) atlas.set(key, []); atlas.get(key).push(p, n); };
+  const add = (p, n, axis, pin) => { const key = [Math.floor(p[0] / TILE), Math.floor(p[1] / TILE), Math.floor(p[2] / TILE)].join(','); if (!atlas.has(key)) atlas.set(key, []); atlas.get(key).push({ axis, n, pin }); };
   const side = PATCH, cols = Math.round(2 * Math.PI * 40 / side);
-  for (let y = TOP; y > BOTTOM; y -= side) { const rr = radiusAt(40, y); for (let c = 0; c < cols; c++) { const a = (c + (Math.round((TOP - y) / side) % 2) * .5) * 2 * Math.PI / cols, n = [Math.cos(a), 0, Math.sin(a)]; add([n[0] * rr, y, n[2] * rr], n); } }
+  for (let y = TOP; y > BOTTOM; y -= side) { const rr = radiusAt(40, y); for (let c = 0; c < cols; c++) { const a = (c + (Math.round((TOP - y) / side) % 2) * .5) * 2 * Math.PI / cols, n = [Math.cos(a), 0, Math.sin(a)]; add([n[0] * rr, y, n[2] * rr], n, [0, y, 0], 40 - rr); } }
   const capCount = Math.round(2 * Math.PI * 40 * 40 / (side * side));
   for (const top of [true, false]) for (let i = 0; i < capCount; i++) {
     const h = (i + .5) / capCount, a = i * 2.39996, s2 = Math.sqrt(1 - h * h), n = [s2 * Math.cos(a), top ? h : -h, s2 * Math.sin(a)];
-    add([n[0] * 40, (top ? TOP : BOTTOM) + n[1] * 40, n[2] * 40], n);
+    add([n[0] * 40, (top ? TOP : BOTTOM) + n[1] * 40, n[2] * 40], n, [0, top ? TOP : BOTTOM, 0], 0);
   }
   postMessage({ type: 'ready', densities, surfaceCubes: [...atlas.keys()], dnaPoints: dna.length });
 }
@@ -106,33 +110,18 @@ function postTile({ key, x0, x1, y0, y1, z0, z1, lod }) {
   const ribos = [];
   for (let i = 0, n = Math.round(densities.ribo * vol * 1.45); i < n; i++) {
     const p = [x0 + r() * (x1 - x0), y0 + r() * (y1 - y0), z0 + r() * (z1 - z0)];
-    if (!inCytoplasm(...p, 1.3) || inSlab(...p) || inZSlot(p[1]) || inNucleoid(...p, .95)) continue;
+    if (!inCytoplasm(...p, 1.3) || blocked(...p) || inZSlot(p[1]) || inNucleoid(...p, .95)) continue;
     ribos.push(p); e.molecule(p, SPECIAL.ribosome, ribosomeShape, ['#9a4fb5', '#b061c4', '#8b45a8'][i % 3], .04);
   }
   const spacing = Math.cbrt(1 / densities.cyto);
   for (let gx = Math.ceil(x0 / spacing); gx * spacing < x1; gx++) for (let gy = Math.ceil(y0 / spacing); gy * spacing < y1; gy++) for (let gz = Math.ceil(z0 / spacing); gz * spacing < z1; gz++) {
     const p = [(gx + (r() - .5) * .7) * spacing, (gy + (r() - .5) * .7) * spacing, (gz + (r() - .5) * .7) * spacing];
-    if (!inCytoplasm(...p, .5) || inSlab(...p) || inZSlot(p[1])) continue;
+    if (!inCytoplasm(...p, .5) || blocked(...p) || inZSlot(p[1])) continue;
     if (inNucleoid(...p) && r() > .3) continue;
     if (ribos.some(q => (q[0] - p[0]) ** 2 + (q[1] - p[1]) ** 2 + (q[2] - p[2]) ** 2 < 1.4)) continue;
     const si = pick.cyto.idx[pick.cyto.sample(r)], s = P.species[si];
     e.molecule(p, si, shapeOf(s, lod), s.color, s.D, scale);
   }
-  const shell = (radius, count, from, thick = 0) => {
-    for (let i = 0; i < count; i++) {
-      const y = y0 + r() * (y1 - y0), z = z0 + r() * (z1 - z0), rr = radiusAt(radius + (thick ? r() * thick : 0), y);
-      const cap = y > TOP ? y - TOP : y < BOTTOM ? y - BOTTOM : 0, h2 = rr * rr - cap * cap - z * z;
-      if (h2 <= 0) continue;
-      const x = (r() < .5 ? -1 : 1) * Math.sqrt(h2);
-      if (x < x0 || x > x1 || inSlab(x, y, z)) continue;
-      const si = from.idx[from.sample(r)], s = P.species[si];
-      e.molecule([x, y, z], si, shapeOf(s, lod), s.color, s.D * .2, scale);
-    }
-  };
-  const span = (y1 - y0) * (z1 - z0) * 2;
-  shell(36.72, Math.round(densities.im * span), pick.im);
-  shell(39.86, Math.round(densities.om * span), pick.om);
-  shell(37.2, Math.round(densities.peri * span * 1.7), pick.peri, 1.7);
   emitDNA(e, key, x0, x1, y0, y1, z0, z1, lod);
   send('tile', key, lod, out);
 }
@@ -162,33 +151,71 @@ function emitDNA(e, key, x0, x1, y0, y1, z0, z1, lod) {
   }
 }
 
-// Exterior tile: the outer leaflet (lime lipid heads), LPS core sugars, swaying O-antigen fronds and outer-membrane proteins.
-function postSurface({ key, cube, lod }) {
+// Envelope tile: for each atlas patch, the full envelope column the window used to hand-build. Outer membrane (lime heads,
+// LPS core sugars, tails, dark inner heads), O-antigen fronds, a woven peptidoglycan layer, periplasmic proteins, the inner
+// membrane bilayer, and inner/outer membrane proteins at measured density. lod 0 = full lattice with tails, 1 = half-density
+// heads, 2 = sparse heads; proteins step 48 → 12 beads.
+function postEnvelope({ key, cube, lod, cut }) {
   const seeds = atlas.get(cube), r = rng(hash(...cube.split(',').map(Number)) + 17 + lod), out = makeOut(), e = emitter(out, r);
   if (!seeds) { send('surface', key, lod, out); return; }
-  const near = lod === 0, side = PATCH * 1.04, cell = PATCH * PATCH;  // each atlas point owns one PATCH × PATCH square (slight overlap hides seams)
-  for (let i = 0; i < seeds.length; i += 2) {
-    const p = seeds[i], n = seeds[i + 1];
+  const side = PATCH * 1.04, cell = PATCH * PATCH, step = [.115, .23, .38][lod], head = [.046, .085, .13][lod];
+  for (const { axis, n, pin } of seeds) {
     const t1 = Math.abs(n[1]) < .9 ? [-n[2], 0, n[0]] : [1, 0, 0], l1 = Math.hypot(...t1), u = t1.map(v => v / l1), v = [n[1] * u[2] - n[2] * u[1], n[2] * u[0] - n[0] * u[2], n[0] * u[1] - n[1] * u[0]];
-    const at = (a, b, h) => [p[0] + u[0] * a + v[0] * b + n[0] * h, p[1] + u[1] * a + v[1] * b + n[1] * h, p[2] + u[2] * a + v[2] * b + n[2] * h];
-    // Lipid heads on a jittered lattice at ~0.12-unit spacing (mid-range tiles thin it and enlarge the heads).
-    const k = Math.max(1, Math.round(side / (near ? .12 : .3)));
-    for (let a = 0; a < k; a++) for (let b = 0; b < k; b++) {
-      const sa = (a / k - .5) * side + (r() - .5) * .04, sb = (b / k - .5) * side + (r() - .5) * .04;
-      if (r() < .3) e.bead(at(sa, sb, .09), near ? .045 : .1, r() < .5 ? '#f3d84e' : '#e8c43a', SPECIAL.lps);
-      else e.bead(at(sa, sb, (r() - .5) * .03), near ? .062 : .12, '#aaf34b', SPECIAL.lipid, .85 + .15 * r());
+    const at = (rad, a, b) => [axis[0] + n[0] * (rad - pin) + u[0] * a + v[0] * b, axis[1] + n[1] * (rad - pin) + u[1] * a + v[1] * b, axis[2] + n[2] * (rad - pin) + u[2] * a + v[2] * b];
+    if (at(40, 0, 0)[2] > cut + 1.2) continue;
+    const k = Math.max(1, Math.round(side / step));
+    for (let ia = 0; ia < k; ia++) for (let ib = 0; ib < k; ib++) {
+      const a = (ia / k - .5) * side + (r() - .5) * .04, b = (ib / k - .5) * side + (r() - .5) * .04, q = at(40, a, b);
+      if (inDisc(q[0], q[1], q[2])) continue;
+      // Outer membrane: outer leaflet (30% LPS core instead of a plain head), tails toward the midplane, inner leaflet.
+      if (r() < .28) e.bead(at(40.09, a, b), head, r() < .5 ? '#f3d84e' : '#e8c43a', SPECIAL.lps);
+      else e.bead(at(40 + (r() - .5) * .05, a, b), head * (.85 + r() * .3), '#aaf34b', SPECIAL.lipid, .85 + .15 * r());
+      e.bead(at(39.73, a, b), head * 1.05, '#638a41', SPECIAL.lipid);
+      if (lod === 0) for (const [rad, rr, col, sh] of [[39.92, .03, '#d9f3a6', .74], [39.81, .03, '#a9c97e', .74]]) e.bead(at(rad, a + (r() - .5) * .02, b), rr, col, SPECIAL.lipid, sh);
+      // Inner membrane: pale outer heads, tails, darker cytoplasmic heads.
+      e.bead(at(36.85 + (r() - .5) * .05, a, b), head * (.85 + r() * .3), '#a9e7dc', SPECIAL.imLipid);
+      e.bead(at(36.58, a, b), head * 1.05, '#639e9e', SPECIAL.imLipid);
+      if (lod === 0) for (const [rad, rr, col, sh] of [[36.77, .03, '#d3f1ea', .74], [36.66, .03, '#9fcfca', .74]]) e.bead(at(rad, a + (r() - .5) * .02, b), rr, col, SPECIAL.imLipid, sh);
     }
-    // O-antigen fronds: chains of sugars rising from the surface.
-    if (r() < (near ? .9 : .45)) {
-      const len = .9 + r() * 2.6, lean = [r() - .5, r() - .5], pale = r() < .5;
-      for (let s = 0; s < len; s += near ? .06 : .12) e.bead(at(lean[0] * s * .3 + Math.sin(s * 3 + i) * .05, lean[1] * s * .3, .12 + s), (near ? .036 : .05) * (1 - .35 * s / len), s > len - .14 ? '#f0efb8' : pale ? '#e2eb9c' : '#cfdc86', SPECIAL.lps);
+    // Peptidoglycan: wavy glycan strands with peptide stems.
+    if (lod < 2) {
+      const lines = lod === 0 ? 8 : 4, beadStep = lod === 0 ? .058 : .116;
+      for (let li = 0; li < lines; li++) {
+        const b0 = (li / lines - .5) * side + .1, ph = r() * 6.283;
+        let m = 0;
+        for (let a = -side / 2; a < side / 2; a += beadStep) {
+          const b = b0 + Math.sin(a * 1.3 + ph) * .045, q = at(39.02 + Math.sin(a * 2.2 + ph) * .035, a, b);
+          if (inDisc(q[0], q[1], q[2])) continue;
+          e.bead(q, lod === 0 ? .04 : .07, '#efe7cc', SPECIAL.wall, .86 + .14 * Math.sin(a * 9 + ph));
+          if (lod === 0 && ++m % 7 === 0) { const dir = m % 14 === 0 ? 1 : -1; for (let s = 1; s < 4; s++) e.bead(at(39.02 + dir * s * .05, a + s * .01, b + s * .05), .026, '#d9cfa5', SPECIAL.wall, .8); }
+        }
+      }
     }
-    // Outer-membrane proteins (porins, OmpA, lipoproteins...) at their measured surface density.
-    const expected = densities.om * cell;
-    for (let m = 0, count = Math.floor(expected) + (r() < expected % 1 ? 1 : 0); m < count; m++) {
-      const si = pick.om.idx[pick.om.sample(r)], s = P.species[si];
-      e.molecule(at((r() - .5) * side, (r() - .5) * side, -.1), si, shapeOf(s, near ? 1 : 2), s.color, s.D * .1, HYDRATED);
+    // O-antigen fronds: sugar chains rising from the surface; their beads sway (stored as offsets from the root).
+    const fronds = [2, 1, 0][lod] + (r() < .5 ? 1 : 0);
+    for (let f = 0; f < fronds; f++) {
+      const a = (r() - .5) * side, b = (r() - .5) * side, base = at(40.12, a, b);
+      if (inDisc(base[0], base[1], base[2])) continue;
+      const len = .9 + r() * 2.6, lean = [r() - .5, r() - .5], pale = r() < .5, stepF = lod === 0 ? .06 : .12;
+      for (let s = 0; s < len; s += stepF) {
+        const q = at(40.12 + s, a + lean[0] * s * .3 + Math.sin(s * 3 + f) * .05, b + lean[1] * s * .3);
+        out.center.push(base[0], base[1], base[2]); out.offset.push(q[0] - base[0], q[1] - base[1], q[2] - base[2]);
+        out.radius.push((lod === 0 ? .034 : .05) * (1 - .35 * s / len)); const c = hex(s > len - .14 ? '#f0efb8' : pale ? '#e2eb9c' : '#cfdc86');
+        out.color.push(c[0], c[1], c[2]); out.seed.push(out.molecules++ % 60000); out.shade.push(1); out.species.push(SPECIAL.lps + 1);
+      }
     }
+    // Membrane and periplasmic proteins at their measured densities.
+    const shape = s => shapeOf(s, lod === 2 ? 2 : 1);
+    const place = (from, expected, radius, thick) => {
+      for (let m = 0, count = Math.floor(expected) + (r() < expected % 1 ? 1 : 0); m < count; m++) {
+        const si = from.idx[from.sample(r)], s = P.species[si], q = at(radius + r() * thick, (r() - .5) * side, (r() - .5) * side);
+        if (inDisc(q[0], q[1], q[2])) continue;
+        e.molecule(q, si, shape(s), s.color, s.D * .15, HYDRATED);
+      }
+    };
+    place(pick.om, densities.om * cell, 39.86, 0);
+    place(pick.im, densities.im * cell, 36.72, 0);
+    place(pick.peri, densities.peri * cell * 1.7, 37.25, 1.5);
   }
   send('surface', key, lod, out);
 }

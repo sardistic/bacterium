@@ -40,7 +40,7 @@ async function start() {
   const minSim=new MinSim(),chemo=new ChemotaxisSim(),minData=new Float32Array(128*4);
   const simTexture=new THREE.DataTexture(minData,128,1,THREE.RGBAFormat,THREE.FloatType);simTexture.minFilter=simTexture.magFilter=THREE.NearestFilter;simTexture.needsUpdate=true;
   const simUniform={value:simTexture};
-  const pickUniform={value:0},bufferHeightUniform={value:1};
+  const pickUniform={value:0},bufferHeightUniform={value:1},flagUniform={value:null},flagRefUniform={value:Array.from({length:7},()=>new THREE.Vector3(0,0,1))},flagLenUniform={value:new Array(7).fill(2)};
   window.__micro.sims={minSim,chemo};
   const materials = [], animated = [], beadMeshes = [];
   let seed = 8711;
@@ -98,21 +98,23 @@ async function start() {
       c+=vec3(cos(ph),0.,sin(ph))*14.*smoothstep(0.,60.,p)*(1.-.6*sp);
       return c+vec3(sd.x,0.,sd.y)*sp*32.+vec3(sin(p*.12+d.x),0.,cos(p*.1+d.y))*sp*7.;
     }
-    // Detailed filament centerline (local to the motor, origin at the rotor axis): rises from the hook, curves into its bundle slot,
-    // and keeps a close-up supercoil that fades out as it joins. 13.4 units of rise bring the hook top (y 6.6) to the bundle base (y 20).
-    vec3 heroPath(float s,float rot){
-      vec3 b=bundlePos(vec3(2.77,20.+s-13.4,1.6),s-13.4,rot)-vec3(2.1,0.,.1);
-      vec3 c=mix(vec3(0.,6.6+s,0.),b,smoothstep(0.,13.4,s));
-      float amp=1.25*smoothstep(.5,6.,s)*(1.-smoothstep(18.,40.,s));
-      return c+vec3(amp*cos(.68*s-rot),0.,amp*sin(.68*s-rot));
+    // Every flagellar filament (the one leaving the detailed motor and the six around the body) has a rest centerline stored in
+    // uFlag (one row per filament, a texel per 0.5 units: xyz, w = arc length past the bundle base). bundlePos moves it.
+    uniform highp sampler2D uFlag;uniform vec3 uFlagRef[7];uniform float uFlagLen[7];
+    vec4 flagRest(int f,float s){float u=clamp(s/.5,0.,uFlagLen[f]-1.001);int i=int(u);return mix(texelFetch(uFlag,ivec2(i,f),0),texelFetch(uFlag,ivec2(i+1,f),0),u-float(i));}
+    vec3 flagCenter(int f,float s,float rot){
+      vec4 r=flagRest(f,s);vec3 c=bundlePos(r.xyz,r.w,rot);
+      // The filament leaving the detailed motor keeps the close-up supercoil until it joins the bundle.
+      if(f==0){float amp=1.25*smoothstep(.5,6.,s)*(1.-smoothstep(18.,40.,s));c+=vec3(amp*cos(.68*s-rot),0.,amp*sin(.68*s-rot));}
+      return c;
     }
-    // Flagellar filament: sub holds (arc length, azimuth, radius) on the flagellin lattice; o is (radial, tangential, axial) inside one subunit.
-    vec3 filamentPos(vec3 sub,vec3 o,float rot,float t){
+    // Flagellin lattice: sub holds (arc length, azimuth, radius); o is (radial, tangential, axial) inside one subunit.
+    vec3 filamentPos(int f,vec3 sub,vec3 o,float rot,float t){
       float sl=sub.x,phi=sub.y-rot,rr=sub.z*(1.+.02*sin(t*1.7+sl*2.3+sub.y*3.));
-      vec3 T=normalize(heroPath(sl+.06,rot)-heroPath(sl-.06,rot));
-      vec3 N=normalize(cross(T,vec3(0.,0.,1.))),B=cross(N,T);
+      vec3 T=normalize(flagCenter(f,sl+.06,rot)-flagCenter(f,sl-.06,rot));
+      vec3 N=normalize(cross(T,uFlagRef[f])),B=cross(N,T);
       vec3 R=cos(phi)*N+sin(phi)*B,Tg=-sin(phi)*N+cos(phi)*B;
-      return heroPath(sl,rot)+R*(rr+o.x)+Tg*o.y+T*o.z;
+      return flagCenter(f,sl,rot)+R*(rr+o.x)+Tg*o.y+T*o.z;
     }
     // Stator units: each MotA pentamer spins about its own axis against the rotor and pulses with a power stroke.
     vec3 statorPose(vec3 rel,float rot,float k,float t){
@@ -151,7 +153,7 @@ async function start() {
         statorRel=centerPos+off-statorCenter;centerPos=statorCenter;off=statorPose(statorRel,uRotor,statorK,uTime);stator=1.;
       }
       if(uMotionKind>7.5&&uMotionKind<8.5){centerPos+=vec3(sin(tm*.52+p)+.28*sin(tm*1.9+p*3.),cos(tm*.61+p*1.3),sin(tm*.43+p*2.))*(.4+fract(p)*.7);}
-      if(uMotionKind>8.5&&uMotionKind<9.5){centerPos=filamentPos(aCenter,subOff,uRotor,uTime);off=vec3(0.);drift=vec3(0.);anchorZ=-1e4;}
+      if(uMotionKind>8.5&&uMotionKind<9.5){int f=int(p+.5);centerPos=filamentPos(f,aCenter,subOff,uRotor,uTime);off=vec3(0.);drift=vec3(0.);anchorZ=(f==0||flagRest(f,aCenter.x).w>0.)?-1e4:0.;}
       // CheY-P messengers wander from the signaling complexes and dock under the C ring.
       if(uMotionKind>9.5&&uMotionKind<10.5){
         float q=fract(uTime*(.05+fract(p*.37)*.04)+fract(p*.61)),e=q*q*(3.-2.*q),a=p*2.39996;
@@ -186,10 +188,12 @@ async function start() {
         float rp=(seg>.5&&seg<1.5)||seg>2.5?r-pinch(t):r,rr=sqrt(max(rp*rp-zc*zc,0.));
         centerPos=seg<.5?vec3(rr*sin(t),-35.+rr*cos(t),zc):seg<1.5?vec3(rr,t,zc):seg<2.5?vec3(rr*sin(t),-175.-rr*cos(t),zc):vec3(-rr,t,zc);
         off=vec3(0.,sin(uTime*2.2+centerPos.x*2.+centerPos.y*1.3)*.02,0.);drift=vec3(0.);
+        // Coarse periplasm clumps on the cut face give way to streamed periplasmic proteins near the camera.
+        if(aRadius>.1)life=smoothstep(30.,45.,distance(cameraPosition,(modelMatrix*vec4(centerPos,1.)).xyz));
       }
       // Hairs (LPS tufts, pili): offsets grow from a surface root and sway more toward the tip.
       if(uMotionKind>14.5&&uMotionKind<15.5){
-        if(abs(fract(p)-.5)<.01)life=smoothstep(16.,26.,distance(cameraPosition,(modelMatrix*vec4(aCenter,1.)).xyz));
+        if(abs(fract(p)-.5)<.01)life=smoothstep(36.,48.,distance(cameraPosition,(modelMatrix*vec4(aCenter,1.)).xyz));
         off=subOff;float L=length(off);vec3 dir=off/max(L,.001),sw=vec3(sin(uTime*.7+p+L*.05),.4*sin(uTime*.5+p*2.),cos(uTime*.55+p*1.3+L*.04));
         off+=(sw-dir*dot(sw,dir))*L*L*.0016;drift=vec3(0.);
       }
@@ -205,13 +209,20 @@ async function start() {
       // Min proteins: visibility follows the live reaction-diffusion profile (row 255 of the simulation texture).
       if(uMotionKind>18.5&&uMotionKind<19.5){
         float u=clamp((5.-aCenter.y)/220.,0.,.9999)*100.;vec4 m=texelFetch(uSim,ivec2(int(u),0),0);
-        life=smoothstep(.12,.55,aOffset.x>.5?m.g:m.r);off=vec3(0.);drift*=.3;
+        life=smoothstep(.12,.55,aOffset.x>.5?m.g:m.r)*smoothstep(30.,45.,distance(cameraPosition,(modelMatrix*vec4(aCenter,1.)).xyz));off=vec3(0.);drift*=.3;
       }
       // Streamed whole-cell molecules: each jiggles and turns in its crowded cage, faster for smaller proteins (amplitude from D in aSeed's fraction).
       if(uMotionKind>24.5&&uMotionKind<25.5){
         float id=floor(p),amp=fract(p);
-        centerPos=aCenter+wander(id*.618+aCenter.x*.013,uTime*(.22+amp*.7)+id*.1)*amp*.5;
-        off=rotY(subOff,id*2.4+wander(id+5.3,uTime*.15*(.3+amp)).y*1.4*amp);drift=vec3(0.);
+        if(aSpecies>65002.5&&aSpecies<65006.5){
+          // Lipids, LPS and wall: the same slow undulation as the hand-built membranes, along the local normal (vertical at the pole).
+          vec3 nrm=normalize(aCenter-vec3(0.,clamp(aCenter.y,-175.,-35.),0.)),dir=normalize(mix(nrm,vec3(0.,1.,0.),smoothstep(-20.,-8.,aCenter.y)));
+          centerPos=aCenter+dir*memWave(vec2(aCenter.x,aCenter.z+min(0.,aCenter.y+15.)*.9),uTime);off=subOff;drift=vec3(0.);
+          if(aSpecies<65004.5){float L=length(off),gust=1.+.9*smoothstep(.2,1.,sin(uTime*.33+aCenter.x*.11+aCenter.z*.07));off+=vec3(sin(uTime*1.7+aCenter.x*.8+aCenter.z*.3),0.,cos(uTime*1.2+aCenter.x*.6))*L*.1*gust;}
+        }else{
+          centerPos=aCenter+wander(id*.618+aCenter.x*.013,uTime*(.22+amp*.7)+id*.1)*amp*.5;
+          off=rotY(subOff,id*2.4+wander(id+5.3,uTime*.15*(.3+amp)).y*1.4*amp);drift=vec3(0.);
+        }
       }
       // Small molecules diffuse faster and farther than proteins: a long wander plus a quick tremor.
       if(uMotionKind>19.5&&uMotionKind<20.5){drift=wander(p,uTime*.85+p)*.95+wander(p+7.,uTime*3.2)*.12;}
@@ -232,7 +243,7 @@ async function start() {
       // Positions over a short virtual shutter drive the motion-blur velocity buffer.
       if(uMotionKind>6.5&&uMotionKind<7.5)prevLocal=rotY(localPos,-uShutter);
       else if(stator>.5)prevLocal=organicShape(statorCenter+statorPose(statorRel,uRotor-uShutter,statorK,uTime),uTime);
-      else if(uMotionKind>8.5&&uMotionKind<9.5)prevLocal=filamentPos(aCenter,subOff,uRotor-uShutter,uTime);
+      else if(uMotionKind>8.5&&uMotionKind<9.5){int f=int(p+.5);prevLocal=localPos+flagCenter(f,aCenter.x,uRotor-uShutter)-flagCenter(f,aCenter.x,uRotor);}
       else prevLocal=localPos;
       vec4 world=modelMatrix*vec4(localPos,1.);
       vAnchorZ=anchorZ<-1e3?anchorZ:(modelMatrix*vec4(centerPos+drift,1.)).z;
@@ -317,7 +328,7 @@ async function start() {
     }
   }
   function beadMaterial(motionKind,detail){
-    const mat=new THREE.ShaderMaterial({vertexShader:beadVertex,fragmentShader:beadFragment,transparent:motionKind===8,depthWrite:motionKind!==8,uniforms:{uTime:timeUniform,uCut:cutUniform,uBufferHeight:bufferHeightUniform,uRadiusScale:{value:1},uMicroDetail:{value:detail?1:0},uMotionKind:{value:motionKind},uCssHeight:heightUniform,uRotor:rotorUniform,uShutter:shutterUniform,uTumble:tumbleUniform,uFog:fogUniform,uSim:simUniform,uPick:pickUniform}});
+    const mat=new THREE.ShaderMaterial({vertexShader:beadVertex,fragmentShader:beadFragment,transparent:motionKind===8,depthWrite:motionKind!==8,uniforms:{uTime:timeUniform,uCut:cutUniform,uBufferHeight:bufferHeightUniform,uRadiusScale:{value:1},uMicroDetail:{value:detail?1:0},uMotionKind:{value:motionKind},uCssHeight:heightUniform,uRotor:rotorUniform,uShutter:shutterUniform,uTumble:tumbleUniform,uFog:fogUniform,uSim:simUniform,uPick:pickUniform,uFlag:flagUniform,uFlagRef:flagRefUniform,uFlagLen:flagLenUniform}});
     materials.push(mat);return mat;
   }
   // With a pivot, atoms are stored relative to it so a shader motion can move the whole assembly as one body.
@@ -335,7 +346,7 @@ async function start() {
   }
   function chain(batch, points, radius, color){for(const p of points)batch.add(p,[0,0,0],radius*range(.8,1.15),color);}
   function surf(x,z,base){return -35+Math.sqrt((35+base)**2-x*x-z*z);}
-  const membraneBeads = new Beads(), wallBeads=new Beads(), periplasm=new Beads(true);
+  const membraneBeads = new Beads();
   // OmpF-like porin trimers: three beta-barrels per trimer span the outer membrane; lipids are cleared from their footprint.
   const porins=[],effluxSites=[[-5.5,-.4],[-12.5,1.2],[10.5,-.8],[15,-2.5],[-17,-1.8],[7.5,1.4]];
   for(let i=0;i<150;i++){const x=range(-20,20),z=range(-11.5,3.6);if(Math.hypot(x-2.1,z-.1)>2.7&&porins.every(p=>Math.hypot(p[0]-x,p[1]-z)>.75)&&effluxSites.every(p=>Math.hypot(p[0]-x,p[1]-z)>1.1))porins.push([x,z,range(0,6.283)]);}
@@ -344,46 +355,11 @@ async function start() {
     for(let y=-.25;y<=.25;y+=.05)for(let k=0;k<16;k++){const a=k*Math.PI/8+y*2.6;membraneBeads.add([cx+Math.cos(a)*.15,surf(cx,cz,4.865)+y,cz+Math.sin(a)*.15],[0,0,0],.031,k%2?'#3fb69c':'#57c9ab',-1,.78+.22*Math.cos(a-rot));}
     for(let k=0;k<10;k++){const a=k*.628;membraneBeads.add([cx+Math.cos(a)*.12,surf(cx,cz,4.865)+.28,cz+Math.sin(a)*.12],[0,0,0],.04,'#7fdcbc');}
   }
-  const inPorin=(x,z)=>porins.some(p=>Math.abs(p[0]-x)<.45&&Math.abs(p[1]-z)<.45)||effluxSites.some(p=>Math.hypot(p[0]-x,p[1]-z)<.36);
-  // Bilayers: a head group in each leaflet plus two tail segments reaching toward the midplane, so the cut edge reads as a striped bilayer.
-  const tails=new Beads();
-  function lipid(x,z,top,bottom,headTop,headBottom,tailTop,tailBottom){
-    membraneBeads.add([x,surf(x,z,top)+range(-.03,.03),z],[0,0,0],range(.036,.05),headTop);
-    membraneBeads.add([x,surf(x,z,bottom)+range(-.02,.02),z],[0,0,0],range(.04,.048),headBottom);
-    const mid=(top+bottom)/2,wob=range(-.012,.012);
-    tails.add([x+wob,surf(x,z,top-.06),z],[0,0,0],.024,tailTop,-1,.8);tails.add([x-wob,surf(x,z,mid+.025),z],[0,0,0],.022,tailTop,-1,.66);
-    tails.add([x-wob,surf(x,z,bottom+.06),z],[0,0,0],.024,tailBottom,-1,.8);tails.add([x+wob,surf(x,z,mid-.025),z],[0,0,0],.022,tailBottom,-1,.66);
-  }
-  const lpsCore=new Beads();
-  for(let x=-21;x<21;x+=.115)for(let z=-12;z<4;z+=.12){
-    const xx=x+range(-.035,.035),zz=z+range(-.035,.035);
-    if(Math.hypot(xx-2.1,zz-.1)<1.15)continue;
-    lipid(xx,zz,1.85,1.58,'#a9e7dc','#639e9e','#d3f1ea','#9fcfca');
-    if(!inPorin(xx,zz)){
-      lipid(xx,zz,5.0,4.73,'#aaf34b','#638a41','#d9f3a6','#a9c97e');
-      // LPS inner core sugars stud the outer surface with yellow beads.
-      if(random()<.26)lpsCore.add([xx+range(-.03,.03),surf(xx,zz,5.075),zz+range(-.03,.03)],[0,0,0],range(.036,.05),random()<.5?'#f3d84e':'#e8c43a');
-    }
-  }
-  // Peptidoglycan: wavy glycan strands with peptide stems that bridge to neighbors above and below.
-  for(let z=-12;z<4;z+=.2){
-    const ph=range(0,6.283);let n=0;
-    for(let x=-21;x<21;x+=.058){
-      if(Math.hypot(x-2.1,z-.1)<1.3)continue;
-      const zz=z+Math.sin(x*1.3+ph)*.045,y=surf(x,zz,4.02)+Math.sin(x*2.2+ph)*.035;
-      wallBeads.add([x,y,zz],[0,0,0],.04,'#efe7cc',-1,.86+.14*Math.sin(x*9+ph));
-      if(++n%7===0){const dir=n%14===0?1:-1;for(let k=1;k<4;k++)wallBeads.add([x+k*.01,y+dir*k*.05,zz+k*.05],[0,0,0],.026,'#d9cfa5',-1,.8);}
-    }
-  }
-  for(let i=0;i<500;i++){
-    const x=range(-21,21),z=range(-12,4);if(Math.hypot(x-2.1,z-.1)<2.4)continue;
-    const y=surf(x,z,range(2.45,3.35));ball(periplasm,[x,y,z],[range(.3,.55),range(.25,.45),range(.3,.55)],random()<.4?'#ddbd57':'#e7cf79',32,range(0,50));
-  }
-  membraneBeads.buildChunked(envelope,4,1.2);tails.buildChunked(envelope,4,1.2);lpsCore.buildChunked(envelope,4,1.2);wallBeads.buildChunked(envelope,4,1.2);periplasm.buildChunked(envelope,0,2.5);
   // Protons pumped out by respiration collect in the periplasm before flowing back through stators and ATP synthase.
   const periplasmProtons=new Beads();
   for(let i=0;i<700;i++){const x=range(-20,20),z=range(-11.5,3.8);periplasmProtons.add([x,surf(x,z,range(2.05,4.55)),z],[0,0,0],range(.028,.045),i%4?'#ff4fa8':'#ff7cc4',range(0,80));}
   periplasmProtons.build(particles,20);
+  membraneBeads.buildChunked(envelope,4,1.2);
   // AcrAB-TolC efflux pumps span both membranes: AcrB in the inner membrane, AcrA adaptors across the periplasm, the TolC channel through the outer membrane.
   const pumps=new Beads(true),drugs=new Beads();
   for(const [x,z] of effluxSites){
@@ -404,22 +380,6 @@ async function start() {
       shader.fragmentShader=velocityOut+'uniform float uCut;varying vec3 vWorldCut;varying vec2 vVel;\n'+shader.fragmentShader.replace('#include <clipping_planes_fragment>','#include <clipping_planes_fragment>\nif(vWorldCut.z>uCut)discard;'+(hole?'if(abs(vWorldCut.x)<21.5&&vWorldCut.z>-12.5&&vWorldCut.z<4.5&&vWorldCut.y>-15.5)discard;':'')).replace('#include <dithering_fragment>','#include <dithering_fragment>\ngVel=vec4(vVel*12.+.5,0.,1.);');
     };m.customProgramCacheKey=()=>(organic==='membrane'?'membrane-v6':organic?'organic-v6':'clipped-v6')+(spinning?'-spin':'')+(hole?'-hole':'');materials.push(m);return m;
   }
-  function ribbon(base,color){
-    const positions=[],indices=[];const nx=100,nz=32;
-    for(let j=0;j<=nz;j++)for(let i=0;i<=nx;i++){const x=-21+42*i/nx,z=-12+16*j/nz;positions.push(x,surf(x,z,base),z);}
-    for(let j=0;j<nz;j++)for(let i=0;i<nx;i++){const a=j*(nx+1)+i;indices.push(a,a+nx+1,a+1,a+1,a+nx+1,a+nx+2);}
-    const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));g.setIndex(indices);g.computeVertexNormals();
-    const m=material(color,'membrane');m.side=THREE.DoubleSide;const mesh=new THREE.Mesh(g,m);envelope.add(mesh);
-  }
-  ribbon(1.7,'#64b1b7');ribbon(4.85,'#7e9d46');
-  const strands=new Beads();
-  // O-antigen tufts: dense, pale wheat-like fronds with feathered side chains, as in the reference.
-  for(let i=0;i<1500;i++){
-    const x=range(-21,21),z=range(-12,4);if(Math.hypot(x-2.1,z-.1)<2)continue;
-    const length=range(.9,3.4),bend=range(-.45,.45),phase=range(0,7),pale=random()<.5;
-    for(let s=0;s<length;s+=.06){const xx=x+bend*s*s/length+Math.sin(s*3+phase)*.05;strands.add([xx,surf(x,z,5.1)+s,z+Math.sin(s*1.7+phase)*.12],[0,0,0],.034*(1-.35*s/length),s>length-.14?'#f0efb8':pale?'#e2eb9c':'#cfdc86');}
-    for(let j=0;j<5;j++){const height=length*range(.3,.95),side=j%2?1:-1,branch=range(.25,.55);for(let t=0;t<branch;t+=.055)strands.add([x+bend*height*height/length+side*t*.55,surf(x,z,5.1)+height+t*.8,z+Math.sin(height*1.7+phase)*.12+t*.25*side],[0,0,0],.025,pale?'#e9efb0':'#d6e295');}
-  }strands.buildChunked(envelope,1,1.5);
 
   const crowd = new Beads(true);
   // Rejection packing prevents the visible rows and repeated spacing of a grid.
@@ -509,27 +469,6 @@ async function start() {
     ball(groes,[x,y+.95,z],[.18,.07,.18],'#ffe08a',32,-1,lid);
   }
   groel.build(proteins);groes.build(proteins,21);
-  for(let attempt=0;attempt<10500;attempt++){
-    const x=range(-20,20),z=range(-11,3.8),y=range(-13,1.2);
-    if(y>surf(x,z,.83))continue;
-    if(Math.hypot(x-2.1,z-.1)<3.55&&y>-4.1)continue;
-    const scale=range(.38,.83),cell=[x,y,z].map(v=>Math.floor(v/2));let overlaps=false;
-    for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++)for(let c=-1;c<=1;c++){
-      for(const p of packing.get([cell[0]+a,cell[1]+b,cell[2]+c].join(','))??[]){if(Math.hypot(x-p[0],y-p[1],z-p[2])<(scale+p[3])*1.30)overlaps=true;}
-    }
-    if(overlaps)continue;
-    const k=cell.join(',');if(!packing.has(k))packing.set(k,[]);packing.get(k).push([x,y,z,scale]);
-    const col=palette[Math.floor(random()*palette.length)],phase=range(0,50);
-    const radii=[scale*range(.8,1.25),scale*range(.75,1.2),scale*range(.8,1.2)];
-    ball(crowd,[x,y,z],radii,col,scale>.72?210:60,phase);
-  }
-  const crowdMesh=crowd.buildChunked(proteins,0,2.5);
-  {
-    const wall=[],wi=[],nx=60,ny=16;
-    for(let j=0;j<=ny;j++)for(let i=0;i<=nx;i++){const x=-21+42*i/nx,top=surf(x,-11.6,.7),y=-14+(top+14)*j/ny;wall.push(x,y,-11.6);}
-    for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){const a=j*(nx+1)+i;wi.push(a,a+1,a+nx+1,a+1,a+nx+2,a+nx+1);}
-    for(const [positions,indices] of [[wall,wi]]){const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));g.setIndex(indices);g.computeVertexNormals();const m=material('#1c3546');m.side=THREE.DoubleSide;proteins.add(new THREE.Mesh(g,m));}
-  }
 
   // The hero motor has an independent rotor. Support assemblies remain anchored.
   const rotor = new THREE.Group();rotor.position.set(2.1,0,.1);motor.add(rotor);
@@ -595,15 +534,6 @@ async function start() {
   coatRing(rotorBeads,.88,.09,6.74,'#e6c993');
   rotorBeads.build(rotor,7);supportBeads.build(fixed,6);
 
-  // Filament: flagellin follows the measured one-start helix (5.5 subunits per turn, 0.47 nm rise), which yields 11 protofilaments.
-  const filament=new Beads(true),rise=.047,twist=65.45*Math.PI/180;
-  for(let m=0;m*rise<60;m++){
-    const s=m*rise,phi=m*twist,shade=.84+.16*Math.sin(m*.31);
-    for(let j=0;j<10;j++)filament.add([s,phi,.42],[range(-.05,.05),range(-.2,.2),range(-.27,.27)],range(.07,.09),'#a8834f',-1,.6);
-    for(let j=0;j<22;j++)filament.add([s,phi,.56],[range(-.1,.1),range(-.16,.16),range(-.26,.26)],range(.055,.075),'#cfab70',-1,.74);
-    for(let j=0;j<34;j++){const u=range(-1,1);filament.add([s,phi,.76],[range(-.08,.1),u*.15+range(-.04,.04),u*.11+range(-.08,.08)],range(.045,.065),j%5?'#efd29a':'#f8e6b8',-1,shade);}
-  }
-  filament.build(fixed,9);
 
 
   // Local SDF proteins: each cube bounds a blended molecular field; rays never scan the entire cell.
@@ -673,13 +603,13 @@ async function start() {
     const pts=[];for(let a=0;a<=Math.PI/2+1e-6;a+=Math.PI/48)pts.push(new THREE.Vector2(r*Math.sin(a),CELL.bottom-r*Math.cos(a)));
     for(let y=CELL.bottom+1;y<CELL.top;y+=1)pts.push(new THREE.Vector2(r-pinch(y),y));
     for(let a=Math.PI/2;a>=-1e-6;a-=Math.PI/48)pts.push(new THREE.Vector2(r*Math.sin(a),CELL.top+r*Math.cos(a)));
-    const m=material(color,false,false,true);m.side=THREE.DoubleSide;envelope.add(new THREE.Mesh(new THREE.LatheGeometry(pts,160),m));
+    const m=material(color);m.side=THREE.DoubleSide;envelope.add(new THREE.Mesh(new THREE.LatheGeometry(pts,160),m));
   }
   // Section rim: bilayers, wall and LPS drawn along the cut face itself (kind 16 follows the cutaway plane).
   const rim=new Beads();
   function rimLayer(r,color,spacing,depths,radius,shade=1,prob=1){
     for(const d of depths){
-      for(let t=-Math.PI/2;t<=Math.PI/2;t+=spacing/r){const x=r*Math.sin(t),y=CELL.top+r*Math.cos(t);if(!(Math.abs(x)<22&&y>-15.5)&&random()<prob)rim.add([0,t,r],[d,0,0],radius*range(.9,1.1),color,-1,shade);}
+      for(let t=-Math.PI/2;t<=Math.PI/2;t+=spacing/r){if(random()<prob)rim.add([0,t,r],[d,0,0],radius*range(.9,1.1),color,-1,shade);}
       for(let y=CELL.top;y>=CELL.bottom;y-=spacing){if(random()<prob)rim.add([1,y,r],[d,0,0],radius*range(.9,1.1),color,-1,shade);if(random()<prob)rim.add([3,y,r],[d,0,0],radius*range(.9,1.1),color,-1,shade);}
       for(let t=-Math.PI/2;t<=Math.PI/2;t+=spacing/r)if(random()<prob)rim.add([2,t,r],[d,0,0],radius*range(.9,1.1),color,-1,shade);
     }
@@ -689,13 +619,13 @@ async function start() {
   rimLayer(40,'#aaf34b',.115,D,.045);rimLayer(39.94,'#d9f3a6',.115,D,.024,.8);rimLayer(39.86,'#d9f3a6',.115,D,.022,.66);rimLayer(39.81,'#a9c97e',.115,D,.022,.66);rimLayer(39.73,'#638a41',.115,D,.046);
   rimLayer(39.02,'#efe7cc',.058,[0],.04,.9);
   rimLayer(36.85,'#a9e7dc',.115,D,.045);rimLayer(36.79,'#d3f1ea',.115,D,.024,.8);rimLayer(36.71,'#d3f1ea',.115,D,.022,.66);rimLayer(36.66,'#9fcfca',.115,D,.022,.66);rimLayer(36.58,'#639e9e',.115,D,.046);
-  for(let i=0;i<2600;i++){const r=range(37.2,38.7),d=range(0,.6),color=random()<.4?'#ddbd57':'#e7cf79';const seg=[0,1,2,3][Math.floor(random()*4)],t=seg%2?range(CELL.bottom,CELL.top):range(-1.5,1.5);if(seg===0&&Math.abs(r*Math.sin(t))<22&&CELL.top+r*Math.cos(t)>-15.5)continue;for(let k=0;k<7;k++)rim.add([seg,t+(seg%2?range(-.25,.25):range(-.007,.007)),r+range(-.25,.25)],[d+range(0,.3),0,0],range(.13,.2),color,-1,range(.75,1));}
+  for(let i=0;i<2600;i++){const r=range(37.2,38.7),d=range(0,.6),color=random()<.4?'#ddbd57':'#e7cf79';const seg=[0,1,2,3][Math.floor(random()*4)],t=seg%2?range(CELL.bottom,CELL.top):range(-1.5,1.5);for(let k=0;k<7;k++)rim.add([seg,t+(seg%2?range(-.25,.25):range(-.007,.007)),r+range(-.25,.25)],[d+range(0,.3),0,0],range(.13,.2),color,-1,range(.75,1));}
   rim.build(envelope,16);
 
   // Surface: LPS tufts and type 1 pili sway as hairs (kind 15).
   const fuzz=new Beads(),pili=[];
-  for(let i=0;i<16000;i++){const p=randomSurface(40.1);if(p[2]>6||inSlab(...p))continue;const n=new THREE.Vector3(...p).sub(new THREE.Vector3(0,Math.min(CELL.top,Math.max(CELL.bottom,p[1])),0)).normalize(),len=range(1.2,3.4),pale=random()<.5;for(let s=0;s<len;s+=.4)fuzz.add(p,[n.x*s+range(-.1,.1),n.y*s+range(-.1,.1),n.z*s+range(-.1,.1)],.42*(1-.4*s/len),pale?'#e2eb9c':'#cfdc86',i+.5);}
-  for(let i=0;i<260;i++){const p=randomSurface(40.1);if(p[2]>6||inSlab(...p))continue;const n=new THREE.Vector3(...p).sub(new THREE.Vector3(0,Math.min(CELL.top,Math.max(CELL.bottom,p[1])),0)).normalize().add(new THREE.Vector3(range(-.35,.35),range(-.35,.35),range(-.35,.35))).normalize(),len=range(25,70);pili.push(new THREE.Vector3(...p).addScaledVector(n,len*.8).toArray());for(let s=0;s<len;s+=.45)fuzz.add(p,[n.x*s,n.y*s,n.z*s],.36,s>len-1.2?'#f1f6d2':'#cfe3c0',i+.25);}
+  for(let i=0;i<16000;i++){const p=randomSurface(40.1);if(p[2]>6)continue;const n=new THREE.Vector3(...p).sub(new THREE.Vector3(0,Math.min(CELL.top,Math.max(CELL.bottom,p[1])),0)).normalize(),len=range(1.2,3.4),pale=random()<.5;for(let s=0;s<len;s+=.3)fuzz.add(p,[n.x*s+range(-.1,.1),n.y*s+range(-.1,.1),n.z*s+range(-.1,.1)],.24*(1-.4*s/len),pale?'#e2eb9c':'#cfdc86',i+.5);}
+  for(let i=0;i<260;i++){const p=randomSurface(40.1);if(p[2]>6)continue;const n=new THREE.Vector3(...p).sub(new THREE.Vector3(0,Math.min(CELL.top,Math.max(CELL.bottom,p[1])),0)).normalize().add(new THREE.Vector3(range(-.35,.35),range(-.35,.35),range(-.35,.35))).normalize(),len=range(25,70);pili.push(new THREE.Vector3(...p).addScaledVector(n,len*.8).toArray());for(let s=0;s<len;s+=.45)fuzz.add(p,[n.x*s,n.y*s,n.z*s],.36,s>len-1.2?'#f1f6d2':'#cfe3c0',i+.25);}
   fuzz.build(envelope,15);
 
   // Interior: two segregating nucleoids (random-walk DNA), ribosomes excluded from them, and the protein crowd.
@@ -712,11 +642,24 @@ async function start() {
   const zRing=new Beads(),minD=new Beads();
   for(let f=0;f<80;f++){const a0=range(0,6.283),dy=range(-1.6,1.6),dr=range(-.4,.3),dir=f%2?.75:.25;for(let k=0;k<12;k++)zRing.add([a0,dy,32.4],[k*.016,range(-.08,.08),dr],range(.42,.5),k%3?'#ff8a3d':'#ff6f2b',f+dir);}
   zRing.build(proteins,18);
-  for(let i=0;i<24000;i++){const p=randomSurface(36.05),isE=i%3===0;if(p[2]>6||inSlab(...p))continue;minD.add(p,[isE?1:0,0,0],range(.3,.4),isE?'#ff7aa8':i%2?'#41d3ff':'#7ae4ff');}
+  for(let i=0;i<24000;i++){const p=randomSurface(36.05),isE=i%3===0;if(p[2]>6)continue;minD.add(p,[isE?1:0,0,0],range(.3,.4),isE?'#ff7aa8':i%2?'#41d3ff':'#7ae4ff');}
   minD.build(proteins,19);
 
-  // Peritrichous flagella: each wraps over the body and pole into one helical bundle trailing above the cell (kind 17).
-  const macroFlagella=new Beads(),macroMotors=new Beads(true),bundleBase=20;
+  // Flagella: the filament leaving the detailed motor (f = 0) and six peritrichous filaments around the body (f = 1..6) share one
+  // flagellin lattice. Each rest centerline (hook → its slot in the bundle above the pole) is resampled every 0.5 units into uFlag.
+  const macroMotors=new Beads(true),bundleBase=20,FLAG_DS=.5,flagRows=[];
+  function bakeFlagellum(points,baseIndex){
+    const arc=[0];for(let i=1;i<points.length;i++)arc.push(arc[i-1]+Math.hypot(points[i][0]-points[i-1][0],points[i][1]-points[i-1][1],points[i][2]-points[i-1][2]));
+    const row=[],total=arc[arc.length-1];let j=0;
+    for(let sArc=0;sArc<=total;sArc+=FLAG_DS){while(j<arc.length-2&&arc[j+1]<sArc)j++;const t=(sArc-arc[j])/Math.max(arc[j+1]-arc[j],1e-6),a=points[j],b=points[j+1];row.push([a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t,sArc-arc[baseIndex]]);}
+    return row;
+  }
+  {
+    // f = 0: rises from the hook top (6.6 units above the rotor), curves into its slot (2.77, 1.6) by the bundle base, then runs up the bundle.
+    const pts=[];for(let s=0;s<=13.4;s+=.05){const w=THREE.MathUtils.smoothstep(s,0,13.4);pts.push([2.1+.67*w,6.6+s,.1+1.5*w]);}
+    const base=pts.length-1;for(let y=bundleBase+.2;y<bundleBase+320;y+=.2)pts.push([2.77,y,1.6]);
+    flagRows.push(bakeFlagellum(pts,base));flagRefUniform.value[0].set(0,0,1);
+  }
   for(let f=0;f<6;f++){
     const around=f*1.047+range(-.3,.3),y0=range(-165,-55),delta=[Math.cos(f*1.047)*3.2,Math.sin(f*1.047)*3.2];
     const pts=[],add=v=>pts.push(v);
@@ -726,15 +669,26 @@ async function start() {
     for(let l=0;l<1.25;l+=.2/44)add([44*Math.cos(l)*Math.cos(around),CELL.top+44*Math.sin(l),44*Math.cos(l)*Math.sin(around)]);
     const c0=new THREE.Vector3(...pts[pts.length-1]),c1=c0.clone().add(new THREE.Vector3(-Math.cos(around)*6,10,-Math.sin(around)*6)),c2=new THREE.Vector3(delta[0],bundleBase,delta[1]);
     for(let t=.008;t<=1;t+=.008){const a=c0.clone().lerp(c1,t),b=c1.clone().lerp(c2,t);add(a.lerp(b,t).toArray());}
-    let s=0;const bundleIndex=pts.length;for(let y=bundleBase+.2;y<bundleBase+320;y+=.2)add([delta[0],y,delta[1]]);
-    for(let i=0;i<pts.length;i++){
-      const sb=i>=bundleIndex?(i-bundleIndex)*.2+.2:-(bundleIndex-i)*.2;
-      for(let k=0;k<16;k++){const a=k*.3927+i*.26;macroFlagella.add(pts[i],[Math.cos(a)*.66,0,Math.sin(a)*.66],.2,(k+i)%6<2?'#f8e6b8':'#e6c58c',sb,.74+.26*Math.cos(a+i*.15));}
-    }
+    const base=pts.length-1;for(let y=bundleBase+.2;y<bundleBase+320;y+=.2)add([delta[0],y,delta[1]]);
+    flagRows.push(bakeFlagellum(pts,base));flagRefUniform.value[f+1].set(-Math.sin(around),0,Math.cos(around));
   }
-  // The detailed filament's continuation: same bundle slot, picking up exactly where the 60-unit lattice ends.
-  for(let sb=60-13.4,i=0;sb<320;sb+=.2,i++)for(let k=0;k<16;k++){const a=k*.3927+i*.26;macroFlagella.add([2.77,20+sb,1.6],[Math.cos(a)*.7,0,Math.sin(a)*.7],.21,(k+i)%6<2?'#f8e6b8':'#e6c58c',sb,.74+.26*Math.cos(a+i*.15));}
-  macroFlagella.build(motor,17);macroMotors.build(motor);
+  {
+    const width=Math.max(...flagRows.map(r=>r.length)),data=new Float32Array(width*7*4);
+    flagRows.forEach((row,f)=>{row.forEach((v,i)=>data.set(v,(f*width+i)*4));flagLenUniform.value[f]=row.length;});
+    const tex=new THREE.DataTexture(data,width,7,THREE.RGBAFormat,THREE.FloatType);tex.minFilter=tex.magFilter=THREE.NearestFilter;tex.needsUpdate=true;flagUniform.value=tex;
+  }
+  // Flagellin follows the measured one-start helix (5.5 subunits per turn, 0.47 nm rise), giving 11 protofilaments. Each subunit:
+  // two inner (D0/D1) beads and a skewed four-bead outer knob (D2/D3), which forms the diagonal grooves seen on the filament.
+  const filament=new Beads(),rise=.047,twist=65.45*Math.PI/180;
+  flagRows.forEach((row,f)=>{
+    const len=(row.length-1)*FLAG_DS;
+    for(let m=0;m*rise<len;m++){
+      const s=m*rise,phi=m*twist,shade=.84+.16*Math.sin(m*.31);
+      filament.add([s,phi,.44],[0,-.09,-.1],.15,'#cfab70',f,.74);filament.add([s,phi,.44],[0,.09,.12],.15,'#c49f62',f,.7);
+      for(let j=0;j<4;j++){const u=-1+j*2/3;filament.add([s,phi,.72],[0,u*.16,u*.12],.125,j===1?'#f8e6b8':'#efd29a',f,shade);}
+    }
+  });
+  filament.build(motor,9);macroMotors.build(motor);
 
   // ── Whole-cell streaming: real E. coli proteome, generated tile by tile in a worker as the camera needs it ──
   const streamer=(()=>{
@@ -742,10 +696,10 @@ async function start() {
     const TILE=12,NX=7,NY=19,X0=-42,Y0=-218,base=new THREE.InstancedBufferGeometry(),tiles=new Map(),inFlight=new Map();
     base.setAttribute('position',new THREE.Float32BufferAttribute(new Float32Array(12),3));base.setAttribute('aMicroId',new THREE.Float32BufferAttribute([0,1,2,3],1));
     const fineMat=beadMaterial(25,true),coarseMat=beadMaterial(25,false);
-    const workers=[0,1,2].map(()=>new Worker('./cellworker.js?v=15')),pending=new Map(workers.map(w=>[w,0]));let ready=false,readyCount=0,proteome=null,surfaceCubes=[];
+    const workers=[0,1,2].map(()=>new Worker('./cellworker.js?v=20')),pending=new Map(workers.map(w=>[w,0]));let ready=false,readyCount=0,proteome=null,surfaceCubes=[];
     const send=msg=>{const w=[...pending].sort((a,b)=>a[1]-b[1])[0][0];pending.set(w,pending.get(w)+1);w.postMessage(msg);};
     const frustum=new THREE.Frustum(),pm=new THREE.Matrix4(),box=new THREE.Box3(),stats={tiles:0,surface:0,molecules:0,beads:0,requests:0};
-    fetch('./cell/proteome.json').then(r=>r.json()).then(p=>{proteome=p;for(const w of workers)w.postMessage({type:'init',proteome:p});}).catch(e=>console.error('proteome',e));
+    fetch('./cell/proteome.json').then(r=>r.json()).then(p=>{proteome=p;const blockers=[];for(const list of packing.values())for(const b of list)blockers.push(b);for(const [x,y,z,sc] of receptorSites)blockers.push([x,y,z,1.3*sc+.3]);const discs=[...porins.map(([x,z])=>[x,z,.48]),...effluxSites.map(([x,z])=>[x,z,.42]),[2.1,.1,1.2]];for(const w of workers)w.postMessage({type:'init',proteome:p,blockers,discs});}).catch(e=>console.error('proteome',e));
     const onTile=(w,{data})=>{
       if(data.type==='ready'){if(++readyCount===workers.length)ready=true;surfaceCubes=data.surfaceCubes.map(k=>k.split(',').map(Number));metrics.dnaPoints=data.dnaPoints;return;}
       pending.set(w,Math.max(0,pending.get(w)-1));
@@ -769,9 +723,9 @@ async function start() {
     function request(key){
       const [slot,lodS,cutS]=key.split('|'),lod=+lodS,[kind,rest]=slot.split(':');
       inFlight.set(slot,key);stats.requests++;
-      if(kind==='s'){send({type:'surface',key,cube:rest,lod});return;}
+      if(kind==='s'){send({type:'surface',key,cube:rest,lod,cut:+cutS/2});return;}
       const [i,j]=rest.split(',').map(Number),x0=X0+i*TILE,y0=Y0+j*TILE,z1=+cutS/2;
-      send({type:'tile',key,x0,x1:x0+TILE,y0,y1:y0+TILE,z0:z1-5,z1,lod});
+      send({type:'tile',key,x0,x1:x0+TILE,y0,y1:y0+TILE,z0:z1-[7,6,5,5][lod],z1,lod});
     }
     function update(){
       if(!ready)return;
@@ -781,23 +735,22 @@ async function start() {
       const consider=(slot,d,key)=>{const have=tiles.get(slot);if(have)have.mesh.visible=true;if(!have||have.key!==key)want.push([d,slot,key]);};
       if(proteins.visible)for(let i=0;i<NX;i++)for(let j=0;j<NY;j++){
         const x0=X0+i*TILE,y0=Y0+j*TILE;
-        if(Math.abs(x0)<21.5&&Math.abs(x0+TILE)<21.5&&y0>-13.4)continue;
-        box.min.set(x0,y0,cutB/2-5);box.max.set(x0+TILE,y0+TILE,cutB/2);
+        box.min.set(x0,y0,cutB/2-7);box.max.set(x0+TILE,y0+TILE,cutB/2);
         if(!frustum.intersectsBox(box))continue;
-        const d=box.distanceToPoint(camera.position),lod=d<10?0:d<24?1:d<70?2:3;
+        const d=box.distanceToPoint(camera.position),lod=d<5?0:d<14?1:d<45?2:3;
         consider('c:'+i+','+j,d,'c:'+i+','+j+'|'+lod+'|'+cutB);
       }
       // The exterior only needs molecular detail near the camera; farther out, the shell and LPS fuzz carry it.
       if(envelope.visible)for(const [cx,cy,cz] of surfaceCubes){
         box.min.set(cx*TILE,cy*TILE,cz*TILE);box.max.set(cx*TILE+TILE,cy*TILE+TILE,cz*TILE+TILE);
-        if(box.min.z>cutUniform.value)continue;
-        const d=box.distanceToPoint(camera.position);if(d>20||!frustum.intersectsBox(box))continue;
-        const slot='s:'+cx+','+cy+','+cz;consider(slot,d,slot+'|'+(d<9?0:1)+'|0');
+        if(box.min.z>cutUniform.value+1)continue;
+        const d=box.distanceToPoint(camera.position);if(d>36||!frustum.intersectsBox(box))continue;
+        const slot='s:'+cx+','+cy+','+cz;consider(slot,d,slot+'|'+(d<6?0:d<16?1:2)+'|'+cutB);
       }
       want.sort((a,b)=>a[0]-b[0]);
       for(const [,slot,key] of want){if(inFlight.has(slot)){inFlight.set(slot,key);continue;}if(inFlight.size>=9)break;request(key);}
       // Free surface tiles that are well behind the camera's reach.
-      for(const [slot,t] of tiles)if(t.mesh.userData.surface&&!t.mesh.visible&&camera.position.distanceTo(t.mesh.geometry.boundingSphere.center)>90){t.mesh.parent?.remove(t.mesh);t.mesh.geometry.dispose();tiles.delete(slot);}
+      for(const [slot,t] of tiles)if(t.mesh.userData.surface&&!t.mesh.visible&&camera.position.distanceTo(t.mesh.geometry.boundingSphere.center)>120){t.mesh.parent?.remove(t.mesh);t.mesh.geometry.dispose();tiles.delete(slot);}
       stats.tiles=0;stats.surface=0;stats.molecules=0;stats.beads=0;for(const t of tiles.values())if(t.mesh.visible){t.mesh.userData.surface?stats.surface++:stats.tiles++;stats.molecules+=t.mesh.userData.molecules;stats.beads+=t.mesh.userData.beads;}
       metrics.stream={...stats};
     }
@@ -981,11 +934,8 @@ async function start() {
     ribosomes:ribosomeSites[1],mrna:polyPath(...polysomes[0],3.5).toArray(),nascent:ribosomeSites[4].map((v,i)=>v+[-.4,-.9,.5][i]),efflux:onSurf(effluxSites[0][0]+.35,effluxSites[0][1]+.3,3.4),drugs:onSurf(effluxSites[3][0],effluxSites[3][1],5.6),crowd:[-6,-6,1.6],dna:[-7.5,-5,-.6],metabolites:[-2.2,-3.2,1.7],specks:[-7,11,3]
   };
   const groupFor={motor,envelope,proteins,particles,suspension};
-  const filamentPoint=(s,out)=>{
-    const sm=THREE.MathUtils.smoothstep,rot=angle,p=s-13.4,ph=.0314*p-rot*.55;
-    let bx=2.77,bz=1.6;if(p>0){const c=Math.cos(ph),n=Math.sin(ph),A=14*sm(p,0,60);[bx,bz]=[c*2.77-n*1.6+Math.cos(ph)*A,n*2.77+c*1.6+Math.sin(ph)*A];}
-    const w=sm(s,0,13.4),amp=1.25*sm(s,.5,6)*(1-sm(s,18,40));
-    return out.set(2.1+THREE.MathUtils.lerp(0,bx-2.1,w)+amp*Math.cos(.68*s-rot),6.6+s,.1+THREE.MathUtils.lerp(0,bz-.1,w)+amp*Math.sin(.68*s-rot));};
+  // Label anchor on the filament leaving the motor: its rest centerline plus the close-up supercoil (still below the bundle base).
+  const filamentPoint=(s,out)=>{const r=flagRows[0][Math.round(s/FLAG_DS)],amp=1.25*THREE.MathUtils.smoothstep(s,.5,6)*(1-THREE.MathUtils.smoothstep(s,18,40));return out.set(r[0]+amp*Math.cos(.68*s-angle),r[1],r[2]+amp*Math.sin(.68*s-angle));};
   const anchorOf=(entry,out)=>entry.id==='filament'?filamentPoint(8,out):out.fromArray(anchorPoints[entry.id]);
   const cutExempt=new Set(['filament','hook','specks','lps','outer','drugs','bundle','pili']);
   const card=$('annot-card'),labelLayer=$('labels');labelLayer.textContent='';
@@ -1071,7 +1021,7 @@ async function start() {
   renderer.domElement.addEventListener('pointerup',e=>{
     if(!downAt||Math.hypot(e.clientX-downAt[0],e.clientY-downAt[1])>5||performance.now()-downAt[2]>450)return;
     const id=pickAt(e.clientX,e.clientY);if(!id)return;
-    const special={65001:'ribosomezone',65002:'nucleoids',65003:'outer',65004:'lps'}[id];if(special){openEntry(special,false);return;}
+    const special={65001:'ribosomezone',65002:'nucleoids',65003:'outer',65004:'lps',65005:'wall',65006:'inner'}[id];if(special){openEntry(special,false);return;}
     const p=streamer.proteome;if(p&&p.species[id-1])openSpecies(p,id-1);
   });
   let last=performance.now(),sample=last,frameCount=0,angle=0,omega=1.65,nextSwitch=12,tumbleUntil=-1,tumbleStart=0,holdClock=0,interacting=false,lastInteraction=performance.now(),idleClock=0;
@@ -1133,7 +1083,7 @@ async function start() {
     frameCount++;metrics.frames++;
     if(now-sample>1000){metrics.fps=Math.round(frameCount*1000/(now-sample));
       // Adaptive resolution: trade pixels for frame rate while the scene is running, and win them back when steady.
-      if(state.adaptive&&running&&!interacting&&!transition){if(metrics.fps<55&&dynScale>.5){dynScale=Math.max(.5,dynScale*.86);steadyFast=0;requestResize();}else if(metrics.fps>=59&&dynScale<1&&++steadyFast>=3){dynScale=Math.min(1,dynScale*1.08);steadyFast=0;requestResize();}}$('fps').textContent=metrics.fps+' FPS';frameCount=0;sample=now;const seconds=Math.floor(state.time);$('clock').textContent=String(Math.floor(seconds/60)).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0');}
+      if(state.adaptive&&running&&!interacting&&!transition){if(metrics.fps<59&&dynScale>.5){dynScale=Math.max(.5,dynScale*.88);steadyFast=0;requestResize();}else if(metrics.fps>=64&&dynScale<1&&++steadyFast>=3){dynScale=Math.min(1,dynScale*1.08);steadyFast=0;requestResize();}}$('fps').textContent=metrics.fps+' FPS';frameCount=0;sample=now;const seconds=Math.floor(state.time);$('clock').textContent=String(Math.floor(seconds/60)).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0');}
     if(!metrics.ready){metrics.ready=true;$('loading').classList.add('hidden');$('render-status').textContent='MOLECULAR LANDSCAPE';}
   }
   function tEase(t){return t*(3-2*t);}
