@@ -81,7 +81,7 @@ export const ENTRIES = [
     cites: ['paxdb2015', 'uniprot2023', 'varadi2022', 'erickson2009', 'milo2013'] },
   { id: 'bundle', group: 'cell', layer: 'motor', scale: 'cell', name: 'Flagellar bundle', kicker: 'several flagella turning together', dist: 300,
     what: 'An E. coli cell has several flagella spread over its surface. When their motors turn counterclockwise, the filaments wrap into one bundle that trails behind and drives the cell forward: a run. When motors switch clockwise, those filaments change shape and fly out of the bundle, and the cell tumbles to a new heading.',
-    model: 'Six flagella wrap over the pole into a rotating helical bundle that splays apart during each tumble (watch the status pill). Real filaments are 5–10 µm long, longer than shown.',
+    model: 'Seven flagella, each with its own complete motor, wrap over the pole into a rotating helical bundle that splays apart during each tumble (watch the status pill). Real motors are scattered over the surface; here four sit on the cut edges so the cutaway shows them, and two sit on the back wall. Real filaments are 5–10 µm long, longer than shown.',
     cites: ['turner2000', 'berg2003'] },
   { id: 'pili', group: 'cell', layer: 'envelope', scale: 'cell', name: 'Type 1 pili', kicker: 'adhesive fimbriae · ~7 nm wide', dist: 150,
     what: 'Hundreds of thin, hair-like fibers stud the surface. Each is a helical rod of FimA subunits tipped with the FimH adhesin, which grips mannose-bearing surfaces such as the cells lining the urinary tract.',

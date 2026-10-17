@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { MolecularSoundscape } from './soundscape.js?v=4';
-import { ENTRIES, CITES, GROUPS, FACTS } from './annotations.js?v=10';
+import { ENTRIES, CITES, GROUPS, FACTS } from './annotations.js?v=11';
 import { MinSim, ChemotaxisSim } from './sim.js?v=10';
 
 const $ = id => document.getElementById(id);
@@ -224,6 +224,7 @@ async function start() {
           off=rotY(subOff,id*2.4+wander(id+5.3,uTime*.15*(.3+amp)).y*1.4*amp);drift=vec3(0.);
         }
       }
+      if(uMotionKind>25.5&&uMotionKind<26.5)life=smoothstep(65.,80.,distance(cameraPosition,(modelMatrix*vec4(aCenter,1.)).xyz));
       // Small molecules diffuse faster and farther than proteins: a long wander plus a quick tremor.
       if(uMotionKind>19.5&&uMotionKind<20.5){drift=wander(p,uTime*.85+p)*.95+wander(p+7.,uTime*3.2)*.12;}
       // GroES lid: binds, caps the folding chamber, then lifts off and drifts away once per cycle.
@@ -660,11 +661,13 @@ async function start() {
     const base=pts.length-1;for(let y=bundleBase+.2;y<bundleBase+320;y+=.2)pts.push([2.77,y,1.6]);
     flagRows.push(bakeFlagellum(pts,base));flagRefUniform.value[0].set(0,0,1);
   }
+  const motorSites=[];
   for(let f=0;f<6;f++){
-    const around=f*1.047+range(-.3,.3),y0=range(-165,-55),delta=[Math.cos(f*1.047)*3.2,Math.sin(f*1.047)*3.2];
+    const around=[Math.PI+.003,-.003,Math.PI+.003,-.003,Math.PI*1.35,Math.PI*1.65][f],y0=[-62,-82,-128,-150,-96,-138][f]+range(-3,3),delta=[Math.cos(f*1.047)*3.2,Math.sin(f*1.047)*3.2];
+    motorSites.push({around,y0});
     const pts=[],add=v=>pts.push(v);
     ball(macroMotors,[Math.cos(around)*38,y0,Math.sin(around)*38],[2.4,1.3,2.4],'#ffe23a',250);
-    for(let r=40;r<44;r+=.2)add([Math.cos(around)*r,y0,Math.sin(around)*r]);
+    for(let r=41.6;r<44;r+=.2)add([Math.cos(around)*r,y0,Math.sin(around)*r]);
     for(let y=y0;y<CELL.top;y+=.2)add([Math.cos(around)*44,y,Math.sin(around)*44]);
     for(let l=0;l<1.25;l+=.2/44)add([44*Math.cos(l)*Math.cos(around),CELL.top+44*Math.sin(l),44*Math.cos(l)*Math.sin(around)]);
     const c0=new THREE.Vector3(...pts[pts.length-1]),c1=c0.clone().add(new THREE.Vector3(-Math.cos(around)*6,10,-Math.sin(around)*6)),c2=new THREE.Vector3(delta[0],bundleBase,delta[1]);
@@ -688,7 +691,21 @@ async function start() {
       for(let j=0;j<4;j++){const u=-1+j*2/3;filament.add([s,phi,.72],[0,u*.16,u*.12],.125,j===1?'#f8e6b8':'#efd29a',f,shade);}
     }
   });
-  filament.build(motor,9);macroMotors.build(motor);
+  filament.build(motor,9);macroMotors.build(motor,26);
+  // Every flagellum has the full motor at its base: the detailed rotor and stator assemblies are reused (shared geometry) at each
+  // body site, oriented along the local envelope normal so its rings sit in the same membranes, cell wall and outer membrane.
+  const motorCopies=motorSites.map(({around,y0})=>{
+    const n=new THREE.Vector3(Math.cos(around),0,Math.sin(around)),site=new THREE.Group();
+    site.position.set(0,y0,0).addScaledVector(n,35-pinch(y0));site.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),n);
+    const r=rotor.clone(),fx=fixed.clone();r.position.set(0,0,0);fx.position.set(0,0,0);site.add(r,fx);motor.add(site);
+    site.userData={rotor:r,center:site.position.clone().addScaledVector(n,1.5)};return site;
+  });
+  const motorFrustum=new THREE.Frustum(),motorMatrix=new THREE.Matrix4(),motorSphere=new THREE.Sphere();
+  function updateMotorCopies(){
+    motorMatrix.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);motorFrustum.setFromProjectionMatrix(motorMatrix);
+    for(const m of motorCopies){motorSphere.set(m.userData.center,9);m.visible=camera.position.distanceTo(m.userData.center)<75&&motorFrustum.intersectsSphere(motorSphere);}
+    metrics.motorsShown=motorCopies.filter(m=>m.visible).length;
+  }
 
   // ── Whole-cell streaming: real E. coli proteome, generated tile by tile in a worker as the camera needs it ──
   const streamer=(()=>{
@@ -696,10 +713,10 @@ async function start() {
     const TILE=12,NX=7,NY=19,X0=-42,Y0=-218,base=new THREE.InstancedBufferGeometry(),tiles=new Map(),inFlight=new Map();
     base.setAttribute('position',new THREE.Float32BufferAttribute(new Float32Array(12),3));base.setAttribute('aMicroId',new THREE.Float32BufferAttribute([0,1,2,3],1));
     const fineMat=beadMaterial(25,true),coarseMat=beadMaterial(25,false);
-    const workers=[0,1,2].map(()=>new Worker('./cellworker.js?v=20')),pending=new Map(workers.map(w=>[w,0]));let ready=false,readyCount=0,proteome=null,surfaceCubes=[];
+    const workers=[0,1,2].map(()=>new Worker('./cellworker.js?v=21')),pending=new Map(workers.map(w=>[w,0]));let ready=false,readyCount=0,proteome=null,surfaceCubes=[];
     const send=msg=>{const w=[...pending].sort((a,b)=>a[1]-b[1])[0][0];pending.set(w,pending.get(w)+1);w.postMessage(msg);};
     const frustum=new THREE.Frustum(),pm=new THREE.Matrix4(),box=new THREE.Box3(),stats={tiles:0,surface:0,molecules:0,beads:0,requests:0};
-    fetch('./cell/proteome.json').then(r=>r.json()).then(p=>{proteome=p;const blockers=[];for(const list of packing.values())for(const b of list)blockers.push(b);for(const [x,y,z,sc] of receptorSites)blockers.push([x,y,z,1.3*sc+.3]);const discs=[...porins.map(([x,z])=>[x,z,.48]),...effluxSites.map(([x,z])=>[x,z,.42]),[2.1,.1,1.2]];for(const w of workers)w.postMessage({type:'init',proteome:p,blockers,discs});}).catch(e=>console.error('proteome',e));
+    fetch('./cell/proteome.json').then(r=>r.json()).then(p=>{proteome=p;const blockers=[];for(const list of packing.values())for(const b of list)blockers.push(b);for(const [x,y,z,sc] of receptorSites)blockers.push([x,y,z,1.3*sc+.3]);const discs=[...porins.map(([x,z])=>[x,z,.48]),...effluxSites.map(([x,z])=>[x,z,.42]),[2.1,.1,1.2]];const motorAxes=motorSites.map(({around,y0})=>{const n=[Math.cos(around),0,Math.sin(around)],o=35-pinch(y0);blockers.push([n[0]*(o-1),y0,n[2]*(o-1),3.4],[n[0]*(o+.9),y0,n[2]*(o+.9),2.4],[n[0]*(o-3.6),y0,n[2]*(o-3.6),1.6]);return [0,y0,0,n[0],n[1],n[2]];});for(const w of workers)w.postMessage({type:'init',proteome:p,blockers,discs,motorAxes});}).catch(e=>console.error('proteome',e));
     const onTile=(w,{data})=>{
       if(data.type==='ready'){if(++readyCount===workers.length)ready=true;surfaceCubes=data.surfaceCubes.map(k=>k.split(',').map(Number));metrics.dnaPoints=data.dnaPoints;return;}
       pending.set(w,Math.max(0,pending.get(w)-1));
@@ -1055,7 +1072,7 @@ async function start() {
       if(!interacting&&!transition&&(tourHold||now-lastInteraction>6000)){holdClock+=dt;idleClock+=dt;const ramp=smoother(Math.min(1,holdClock/2.5)),yaw=(tourHold?.032:.045*Math.sin(idleClock*.13))*ramp*dt;camera.position.sub(controls.target).applyAxisAngle(camera.up,yaw).multiplyScalar(tourHold?1-.006*ramp*dt:1).add(controls.target);}
     }
     shutterUniform.value=running?omega*state.speed*.09:0;
-    rotor.rotation.y=angle;rotorUniform.value=angle;timeUniform.value=state.time;
+    rotor.rotation.y=angle;for(const m of motorCopies)m.userData.rotor.rotation.y=angle;updateMotorCopies();rotorUniform.value=angle;timeUniform.value=state.time;
     for(let i=0;i<animated.length;i++){animated[i].rotation.y=state.time*(.6+i*.13);animated[i].rotation.z=Math.sin(state.time*1.2+i)*.12;}
     metrics.rotorAngle=angle;
     if(transition){

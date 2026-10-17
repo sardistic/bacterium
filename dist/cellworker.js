@@ -3,7 +3,7 @@
 // outer-membrane proteins. Deterministic per tile, so revisiting a place rebuilds the same molecules.
 //
 // Detail levels: 0 = 96-bead proteins + DNA double helix, 1 = 48 beads, 2 = 12 beads, 3 = one bead per molecule.
-let P = null, pick = {}, densities = null, dna = null, dnaBuckets = null, atlas = null, napSpecies = [], blockers = [], discs = [];
+let P = null, pick = {}, densities = null, dna = null, dnaBuckets = null, atlas = null, napSpecies = [], blockers = [], discs = [], motorAxes = [];
 const TOP = -35, BOTTOM = -175, MID = -105, TILE = 12;
 const pinch = y => 3.5 * Math.exp(-(((y - MID) / 7) ** 2));
 const radiusAt = (r, y) => (y < TOP && y > BOTTOM ? r - pinch(y) : r);
@@ -17,7 +17,9 @@ const SPECIAL = { ribosome: 65000, dna: 65001, lipid: 65002, lps: 65003, wall: 6
 // Hand-built machines in the top window: cytoplasm spheres [x,y,z,r] and the motor column keep streamed molecules out;
 // membrane discs [x,z,r] (porins, efflux pumps, motor bushings) keep lipids out.
 const blocked = (x, y, z) => (Math.hypot(x - 2.1, z - .1) < 3.55 && y > -4.1) || blockers.some(b => (x - b[0]) ** 2 + (y - b[1]) ** 2 + (z - b[2]) ** 2 < b[3] * b[3]);
-const inDisc = (x, y, z) => y > -16 && discs.some(d => (x - d[0]) ** 2 + (z - d[1]) ** 2 < d[2] * d[2]);
+// Body motors: keep envelope beads off the column around each motor axis (rings, rod and hook pass through every layer).
+const nearMotor = (x, y, z) => motorAxes.some(a => { const dx = x - a[0], dy = y - a[1], dz = z - a[2], t = dx * a[3] + dy * a[4] + dz * a[5]; return dx * dx + dy * dy + dz * dz - t * t < 1.45 * 1.45 && t > 30; });
+const inDisc = (x, y, z) => (y > -16 && discs.some(d => (x - d[0]) ** 2 + (z - d[1]) ** 2 < d[2] * d[2])) || nearMotor(x, y, z);
 
 function rng(seed) { let s = seed >>> 0 || 1; return () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return (s >>> 0) / 4294967296; }; }
 function hash(a, b, c) { let h = 2166136261 ^ a; h = Math.imul(h ^ b, 16777619); h = Math.imul(h ^ c, 16777619); return h >>> 0; }
@@ -33,7 +35,7 @@ function randomQuat(r) { const u1 = r(), u2 = r() * 6.2832, u3 = r() * 6.2832, a
 const hex = c => [parseInt(c.slice(1, 3), 16) / 255, parseInt(c.slice(3, 5), 16) / 255, parseInt(c.slice(5, 7), 16) / 255];
 
 onmessage = ({ data }) => {
-  if (data.type === 'init') { blockers = data.blockers || []; discs = data.discs || []; init(data.proteome); return; }
+  if (data.type === 'init') { blockers = data.blockers || []; discs = data.discs || []; motorAxes = data.motorAxes || []; init(data.proteome); return; }
   if (data.type === 'tile') postTile(data);
   if (data.type === 'surface') postEnvelope(data);
 };
