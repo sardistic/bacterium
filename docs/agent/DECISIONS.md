@@ -76,3 +76,12 @@
   - The fragment shader no longer computes a per-fragment matrix inverse and shares its trig terms.
   - Measured headless at 1440×960: motor 62 fps, envelope 82, interior 61–67, cell about 145–165, and about 90 zoomed into the whole-cell layer.
 - Picking: a 1-pixel re-render with species ids (background removed, point sizes rescaled) opens a card built from the proteome table.
+
+2026-10-17: Revision 11 (no black flashes, uniform detail, one connected flagellum).
+- Flashing: adaptive resolution resized the canvas after a frame was presented, and a resize clears the drawing buffer. All resizes now go through `requestResize()` and run at the top of `frame()`, before drawing. Detail-level changes (`updateLOD`) no longer touch the canvas. Adaptive resolution pauses during interaction and camera flights. Measured: 0 dark frames in 100 captured during drag and zoom, with 3 resolution changes.
+- Uniform detail: the worker gains 96-bead AlphaFold shapes (`lodU`) and four levels (96, 48, 12 beads, single bead at d < 10, 24, 70, beyond).
+  - Nucleoid DNA is streamed as a double helix (3.4 nm pitch) with bound NAPs (HU, H-NS, Fis, IHF, Dps from the proteome). It replaces the coarse random-walk beads.
+  - Outer-surface tiles (an even grid on the capsule with 1.6-unit patches) carry lipid heads, LPS core, O-antigen fronds and outer-membrane proteins at measured density within 20 units of the camera. The coarse LPS tufts fade out near the camera.
+  - Three workers share tile generation, with up to 9 requests in flight.
+- Flagellum: one shared `bundlePos()` drives every filament. The detailed lattice now runs 60 units, curving from the hook into its own bundle slot, with its close-up supercoil fading out. A coarse continuation in the same slot picks up exactly where it ends. Bundle members are drawn as filaments with 16 subunits per ring every 0.2 units, so all filaments rotate, wave and splay together during tumbles.
+- QA: verify.cjs waits for tile streaming to settle before the pause-hash check (the likely source of the earlier intermittent failure) and allows one frame for deferred resizes.

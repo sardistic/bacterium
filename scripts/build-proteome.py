@@ -6,7 +6,7 @@ Inputs (downloaded into a cache directory, never committed):
   * AlphaFold DB models (CC-BY 4.0) for the most abundant species.
 
 Output: species with copies per cell, compartment, size, diffusion coefficient, colour, and coarse-grained
-bead shapes at 48 and 12 beads (k-means on confident C-alpha atoms). Ribosomal proteins are folded into a
+bead shapes at 96, 48 and 12 beads (k-means on confident C-alpha atoms). Ribosomal proteins are folded into a
 ribosome count instead of being placed as free proteins.
 
 Usage: python scripts/build-proteome.py <cache-dir> [--species 700]
@@ -121,7 +121,7 @@ def main():
         path = os.path.join(cache, 'af', s['acc'] + '.pdb')
         if meta:
             fetch(meta[0]['pdbUrl'], path)
-        s['lod0'] = shape(path, 48); s['lod1'] = shape(path, 12)
+        s['lodU'] = shape(path, 96); s['lod0'] = shape(path, 48); s['lod1'] = shape(path, 12)
         if i % 50 == 0:
             print(f'  shapes {i}/{len(top)}', flush=True)
     palette = {'cyto': ['#51c8d6', '#8cdee0', '#42bacb', '#5acbd3', '#51b5d2', '#83c9ed', '#9bbbf2', '#7fb0ec', '#76d4c6', '#b1a7ef', '#ed95d6', '#f2b5de', '#c57dd3'],
@@ -135,7 +135,7 @@ def main():
     doc = {'source': {'abundance': 'PaxDb 511145 WHOLE_ORGANISM integrated (Wang et al. 2015)', 'proteome': 'UniProt UP000000625 reviewed',
                       'structures': 'AlphaFold DB (Varadi et al. 2022), CC-BY 4.0', 'built': time.strftime('%Y-%m-%d')},
            'totalProteins': round(sum(s['copies'] for s in species)), 'ribosomes': round(ribosomes), 'coverage': round(covered, 4),
-           'species': out_species, 'shapes': [{'acc': s['acc'], 'lod0': s['lod0'], 'lod1': s['lod1']} for s in top]}
+           'species': out_species, 'shapes': [{'acc': s['acc'], 'lodU': s['lodU'], 'lod0': s['lod0'], 'lod1': s['lod1']} for s in top]}
     os.makedirs(os.path.join('dist', 'cell'), exist_ok=True)
     with open(os.path.join('dist', 'cell', 'proteome.json'), 'w', encoding='utf-8') as f:
         json.dump(doc, f, separators=(',', ':'))
