@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { MolecularSoundscape } from './soundscape.js?v=4';
-import { ENTRIES, CITES, GROUPS, FACTS } from './annotations.js?v=9';
-import { MinSim, ChemotaxisSim, BrownianSim } from './sim.js?v=9';
+import { ENTRIES, CITES, GROUPS, FACTS } from './annotations.js?v=10';
+import { MinSim, ChemotaxisSim } from './sim.js?v=10';
 
 const $ = id => document.getElementById(id);
-const state = { paused: matchMedia('(prefers-reduced-motion: reduce)').matches, speed: 1, direction: 1, time: 0, cut: 65, ao: true, labels: true, view: 'motor', quality: 'balanced', tour: false, selected: null, autoSwitch: true };
+const state = { paused: matchMedia('(prefers-reduced-motion: reduce)').matches, speed: 1, direction: 1, time: 0, cut: 65, ao: true, labels: true, view: 'motor', quality: 'balanced', tour: false, selected: null, autoSwitch: true, adaptive: true };
 const metrics = { ready: false, frames: 0, sphereCount: 0, drawCalls: 0, fps: 0, shaderErrors: [] };
 window.__micro = { state, metrics };
 
@@ -37,10 +37,11 @@ async function start() {
   const sound=new MolecularSoundscape();window.__micro.sound=sound;
   const cutUniform = { value: 2.1 }, timeUniform = { value: 0 },heightUniform={value:innerHeight},rotorUniform={value:0},shutterUniform={value:0},tumbleUniform={value:0},fogUniform={value:new THREE.Vector2(24,64)};
   // Live models: Brownian dynamics for whole-cell molecules (rows 0-254 of a float texture), the Min profile (row 255).
-  const brownian=new BrownianSim(255*256),minSim=new MinSim(),chemo=new ChemotaxisSim();
-  const simTexture=new THREE.DataTexture(brownian.data,256,256,THREE.RGBAFormat,THREE.FloatType);simTexture.minFilter=simTexture.magFilter=THREE.NearestFilter;simTexture.needsUpdate=true;
+  const minSim=new MinSim(),chemo=new ChemotaxisSim(),minData=new Float32Array(128*4);
+  const simTexture=new THREE.DataTexture(minData,128,1,THREE.RGBAFormat,THREE.FloatType);simTexture.minFilter=simTexture.magFilter=THREE.NearestFilter;simTexture.needsUpdate=true;
   const simUniform={value:simTexture};
-  window.__micro.sims={brownian,minSim,chemo};
+  const pickUniform={value:0},bufferHeightUniform={value:1};
+  window.__micro.sims={minSim,chemo};
   const materials = [], animated = [], beadMeshes = [];
   let seed = 8711;
   const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
@@ -82,12 +83,12 @@ async function start() {
     }`;
   const beadVertex = `
     attribute vec3 aCenter, aOffset, aColor;
-    attribute float aRadius, aSeed, aShade, aMicroId;
-    uniform float uTime,uRadiusScale,uMicroDetail,uMotionKind,uCssHeight,uRotor,uShutter,uTumble,uCut;
+    attribute float aRadius, aSeed, aShade, aMicroId, aSpecies;
+    uniform float uTime,uRadiusScale,uMicroDetail,uMotionKind,uCssHeight,uRotor,uShutter,uTumble,uCut,uBufferHeight;
     uniform highp sampler2D uSim;
     varying vec3 vCenter, vColor, vWorldCenter;
-    varying vec2 vUv, vVel;
-    varying float vRadius, vShade, vAnchorZ,vDust;
+    varying vec2 vVel;
+    varying float vRadius, vShade, vAnchorZ,vDust,vSpecies;
     ${organicField}
     vec3 rotY(vec3 v,float a){float c=cos(a),s=sin(a);return vec3(c*v.x+s*v.z,v.y,-s*v.x+c*v.z);}
     // Brownian-like wander: a Catmull-Rom curve through random keyframes, so speed and direction change irregularly.
@@ -201,13 +202,14 @@ async function start() {
       }
       // Min proteins: visibility follows the live reaction-diffusion profile (row 255 of the simulation texture).
       if(uMotionKind>18.5&&uMotionKind<19.5){
-        float u=clamp((5.-aCenter.y)/220.,0.,.9999)*100.;vec4 m=texelFetch(uSim,ivec2(int(u),255),0);
+        float u=clamp((5.-aCenter.y)/220.,0.,.9999)*100.;vec4 m=texelFetch(uSim,ivec2(int(u),0),0);
         life=smoothstep(.12,.55,aOffset.x>.5?m.g:m.r);off=vec3(0.);drift*=.3;
       }
-      // Whole-cell molecules: positions and spin come from the Brownian-dynamics texture; offsets shape each molecule.
-      if(uMotionKind>23.5&&uMotionKind<24.5){
-        float idx=aCenter.x;vec4 sp=texelFetch(uSim,ivec2(int(mod(idx,256.)),int(floor(idx/256.))),0);
-        centerPos=sp.xyz;off=rotY(subOff,sp.w);drift=vec3(0.);
+      // Streamed whole-cell molecules: each jiggles and turns in its crowded cage, faster for smaller proteins (amplitude from D in aSeed's fraction).
+      if(uMotionKind>24.5&&uMotionKind<25.5){
+        float id=floor(p),amp=fract(p);
+        centerPos=aCenter+wander(id*.618+aCenter.x*.013,uTime*(.22+amp*.7)+id*.1)*amp*.5;
+        off=rotY(subOff,id*2.4+wander(id+5.3,uTime*.15*(.3+amp)).y*1.4*amp);drift=vec3(0.);
       }
       // Small molecules diffuse faster and farther than proteins: a long wander plus a quick tremor.
       if(uMotionKind>19.5&&uMotionKind<20.5){drift=wander(p,uTime*.85+p)*.95+wander(p+7.,uTime*3.2)*.12;}
@@ -239,40 +241,43 @@ async function start() {
       vCenter=center.xyz;vWorldCenter=world.xyz;vRadius=aRadius*uRadiusScale*microScale*life;vColor=aColor;vShade=aShade;
       vDust=step(7.5,uMotionKind)*step(uMotionKind,8.5);
       if(vDust>.5)vRadius=min(vRadius,3.*(-center.z)/(projectionMatrix[1][1]*uCssHeight));
-      vUv=position.xy;
-      center.xy+=position.xy*vRadius*1.08;
+      vSpecies=aSpecies;
       gl_Position=projectionMatrix*center;
+      gl_PointSize=max(1.,2.16*vRadius*projectionMatrix[1][1]*.5*uBufferHeight/max(-center.z,.01));
     }`;
   // Lighting: warm wrapped key, cool sky/ground ambient, soft sheen and a colored translucent rim. Velocity goes to a second target for motion blur.
   const velocityOut='layout(location = 1) out highp vec4 gVel;\n';
   const beadFragment = velocityOut+`
-    uniform float uCut;uniform vec2 uFog;uniform mat4 projectionMatrix;
+    uniform float uCut,uPick;uniform vec2 uFog;uniform mat4 projectionMatrix;
     varying vec3 vCenter,vColor,vWorldCenter;
-    varying vec2 vUv,vVel;
-    varying float vRadius,vShade,vAnchorZ,vDust;
+    varying vec2 vVel;
+    varying float vRadius,vShade,vAnchorZ,vDust,vSpecies;
     void main(){
+      vec2 vUv=vec2(gl_PointCoord.x*2.-1.,1.-gl_PointCoord.y*2.);
       vec3 ray=normalize(vec3(vCenter.xy+vUv*vRadius*1.08,vCenter.z));
       float b=dot(ray,vCenter);float c=dot(vCenter,vCenter)-vRadius*vRadius;
       float h=b*b-c;if(h<0.)discard;
       float t=b-sqrt(h);if(t<=0.)discard;
       vec3 p=ray*t;vec3 normal=normalize(p-vCenter);
-      vec3 worldP=(inverse(viewMatrix)*vec4(p,1.)).xyz;
+      vec3 worldP=vWorldCenter+(p-vCenter)*mat3(viewMatrix);
       if(vAnchorZ>uCut&&vDust<.5)discard;
       vec4 clip=projectionMatrix*vec4(p,1.);gl_FragDepth=clip.z/clip.w*.5+.5;
       vec3 light=normalize(mat3(viewMatrix)*vec3(-.35,.9,1.1));
-      vec3 rough=vec3(cos(worldP.x*92.)*sin(worldP.y*83.)*sin(worldP.z*87.),sin(worldP.x*92.)*cos(worldP.y*83.)*sin(worldP.z*87.),sin(worldP.x*92.)*sin(worldP.y*83.)*cos(worldP.z*87.));
+      vec3 sw=sin(worldP*vec3(92.,83.,87.)),cw=cos(worldP*vec3(92.,83.,87.));
+      vec3 rough=vec3(cw.x*sw.y*sw.z,sw.x*cw.y*sw.z,sw.x*sw.y*cw.z);
       normal=normalize(normal+mat3(viewMatrix)*rough*.1);
       vec3 wn=normalize(normal*mat3(viewMatrix)),eye=-normalize(p);
       float wrap=max((dot(normal,light)+.38)/1.38,0.);
       vec3 ambient=mix(vec3(.25,.23,.30),vec3(.48,.54,.58),wn.y*.5+.5);
       float back=max(dot(normal,normalize(mat3(viewMatrix)*vec3(.8,.4,-.4))),0.);
       float rim=pow(1.-max(dot(normal,eye),0.),2.5);
-      float grain=sin(worldP.x*92.)*sin(worldP.y*83.)*sin(worldP.z*87.);
+      float grain=sw.x*sw.y*sw.z;
       float sheen=pow(max(dot(reflect(-light,normal),eye),0.),16.)*.09;
       vec3 col=vColor*(ambient+vec3(1.,.95,.86)*.92*wrap*wrap+vec3(.55,.7,.85)*.13*back)*mix(.69,1.,vShade)*(.98+grain*.025)+sheen*vec3(1.,.97,.9)+vColor*vColor*.16*rim;
       float fog=smoothstep(uFog.x,uFog.y,-p.z);col=mix(col,vec3(.008,.024,.036),fog*.45);
       gl_FragColor=vec4(col,1.);gVel=vec4(vVel*12.+.5,0.,1.);
-      if(vDust>.5){gl_FragColor=vec4(vec3(.72,.84,.86),smoothstep(0.,.45,h/max(vRadius*vRadius,.000001))*.5*(1.-smoothstep(30.,65.,-p.z)));gVel=vec4(0.);}
+      if(uPick>.5){if(vDust>.5)discard;gl_FragColor=vec4(mod(vSpecies,256.)/255.,floor(vSpecies/256.)/255.,0.,1.);}
+      else if(vDust>.5){gl_FragColor=vec4(vec3(.72,.84,.86),smoothstep(0.,.45,h/max(vRadius*vRadius,.000001))*.5*(1.-smoothstep(30.,65.,-p.z)));gVel=vec4(0.);}
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
     }`;
@@ -282,9 +287,7 @@ async function start() {
     build(parent,motionKind=0){
       if(!this.r.length)return;
       const geo=new THREE.InstancedBufferGeometry();
-      const vertices=[],indices=[],microIds=[];
-      for(let i=0;i<4;i++){vertices.push(-1,-1,0,1,-1,0,1,1,0,-1,1,0);indices.push(i*4,i*4+1,i*4+2,i*4,i*4+2,i*4+3);microIds.push(i,i,i,i);}
-      geo.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));geo.setAttribute('aMicroId',new THREE.Float32BufferAttribute(microIds,1));geo.setIndex(indices);geo.setDrawRange(0,this.detail?24:6);
+      geo.setAttribute('position',new THREE.Float32BufferAttribute(new Float32Array(12),3));geo.setAttribute('aMicroId',new THREE.Float32BufferAttribute([0,1,2,3],1));geo.setDrawRange(0,this.detail?4:1);
       for(const [name,arr,size] of [['aCenter',this.c,3],['aOffset',this.o,3],['aRadius',this.r,1],['aColor',this.colors,3],['aSeed',this.seeds,1],['aShade',this.shades,1]]){
         const data=new Float32Array(arr.length);let index=0;
         // Interleave atom subsets so lower detail thins every molecule equally.
@@ -292,9 +295,28 @@ async function start() {
         geo.setAttribute(name,new THREE.InstancedBufferAttribute(data,size));
       }
       geo.instanceCount=this.r.length;
-      const mat=new THREE.ShaderMaterial({vertexShader:beadVertex,fragmentShader:beadFragment,transparent:motionKind===8,depthWrite:motionKind!==8,uniforms:{uTime:timeUniform,uCut:cutUniform,uRadiusScale:{value:1},uMicroDetail:{value:this.detail?1:0},uMotionKind:{value:motionKind},uCssHeight:heightUniform,uRotor:rotorUniform,uShutter:shutterUniform,uTumble:tumbleUniform,uFog:fogUniform,uSim:simUniform}});
-      const mesh=new THREE.Mesh(geo,mat);mesh.frustumCulled=false;mesh.userData.fullCount=this.r.length;mesh.userData.detail=this.detail;beadMeshes.push(mesh);parent.add(mesh);materials.push(mat);metrics.sphereCount+=this.r.length;return mesh;
+      const mat=beadMaterial(motionKind,this.detail);
+      const mesh=new THREE.Points(geo,mat);mesh.frustumCulled=false;mesh.userData.fullCount=this.r.length;mesh.userData.detail=this.detail;beadMeshes.push(mesh);parent.add(mesh);metrics.sphereCount+=this.r.length;return mesh;
     }
+    // Split into ~10-unit cells by bead position; each chunk gets a bounding sphere padded by how far its kind can move.
+    buildChunked(parent,motionKind=0,margin=2.5){
+      const n=this.r.length;if(!n)return;
+      const cells=new Map();
+      for(let i=0;i<n;i++){const k=Math.floor((this.c[i*3]+this.o[i*3])/10)+','+Math.floor((this.c[i*3+1]+this.o[i*3+1])/10)+','+Math.floor((this.c[i*3+2]+this.o[i*3+2])/10);if(!cells.has(k))cells.set(k,[]);cells.get(k).push(i);}
+      let first=null;
+      for(const idx of cells.values()){
+        const part=new Beads(this.detail);
+        for(const i of idx){part.c.push(this.c[i*3],this.c[i*3+1],this.c[i*3+2]);part.o.push(this.o[i*3],this.o[i*3+1],this.o[i*3+2]);part.r.push(this.r[i]);part.colors.push(this.colors[i*3],this.colors[i*3+1],this.colors[i*3+2]);part.seeds.push(this.seeds[i]);part.shades.push(this.shades[i]);}
+        const mesh=part.build(parent,motionKind);const box=new THREE.Box3();const v=new THREE.Vector3();
+        for(let i=0;i<part.r.length;i++)box.expandByPoint(v.set(part.c[i*3]+part.o[i*3],part.c[i*3+1]+part.o[i*3+1],part.c[i*3+2]+part.o[i*3+2]));
+        mesh.geometry.boundingSphere=box.getBoundingSphere(new THREE.Sphere());mesh.geometry.boundingSphere.radius+=margin;mesh.frustumCulled=true;mesh.userData.chunked=true;first??=mesh;
+      }
+      return first;
+    }
+  }
+  function beadMaterial(motionKind,detail){
+    const mat=new THREE.ShaderMaterial({vertexShader:beadVertex,fragmentShader:beadFragment,transparent:motionKind===8,depthWrite:motionKind!==8,uniforms:{uTime:timeUniform,uCut:cutUniform,uBufferHeight:bufferHeightUniform,uRadiusScale:{value:1},uMicroDetail:{value:detail?1:0},uMotionKind:{value:motionKind},uCssHeight:heightUniform,uRotor:rotorUniform,uShutter:shutterUniform,uTumble:tumbleUniform,uFog:fogUniform,uSim:simUniform,uPick:pickUniform}});
+    materials.push(mat);return mat;
   }
   // With a pivot, atoms are stored relative to it so a shader motion can move the whole assembly as one body.
   function ball(batch, center, radii, color, count=100, phase=-1, pivot=null){
@@ -355,7 +377,7 @@ async function start() {
     const x=range(-21,21),z=range(-12,4);if(Math.hypot(x-2.1,z-.1)<2.4)continue;
     const y=surf(x,z,range(2.45,3.35));ball(periplasm,[x,y,z],[range(.3,.55),range(.25,.45),range(.3,.55)],random()<.4?'#ddbd57':'#e7cf79',32,range(0,50));
   }
-  membraneBeads.build(envelope,4);tails.build(envelope,4);lpsCore.build(envelope,4);wallBeads.build(envelope,4);periplasm.build(envelope);
+  membraneBeads.buildChunked(envelope,4,1.2);tails.buildChunked(envelope,4,1.2);lpsCore.buildChunked(envelope,4,1.2);wallBeads.buildChunked(envelope,4,1.2);periplasm.buildChunked(envelope,0,2.5);
   // Protons pumped out by respiration collect in the periplasm before flowing back through stators and ATP synthase.
   const periplasmProtons=new Beads();
   for(let i=0;i<700;i++){const x=range(-20,20),z=range(-11.5,3.8);periplasmProtons.add([x,surf(x,z,range(2.05,4.55)),z],[0,0,0],range(.028,.045),i%4?'#ff4fa8':'#ff7cc4',range(0,80));}
@@ -395,7 +417,7 @@ async function start() {
     const length=range(.9,3.4),bend=range(-.45,.45),phase=range(0,7),pale=random()<.5;
     for(let s=0;s<length;s+=.06){const xx=x+bend*s*s/length+Math.sin(s*3+phase)*.05;strands.add([xx,surf(x,z,5.1)+s,z+Math.sin(s*1.7+phase)*.12],[0,0,0],.034*(1-.35*s/length),s>length-.14?'#f0efb8':pale?'#e2eb9c':'#cfdc86');}
     for(let j=0;j<5;j++){const height=length*range(.3,.95),side=j%2?1:-1,branch=range(.25,.55);for(let t=0;t<branch;t+=.055)strands.add([x+bend*height*height/length+side*t*.55,surf(x,z,5.1)+height+t*.8,z+Math.sin(height*1.7+phase)*.12+t*.25*side],[0,0,0],.025,pale?'#e9efb0':'#d6e295');}
-  }strands.build(envelope,1);
+  }strands.buildChunked(envelope,1,1.5);
 
   const crowd = new Beads(true);
   // Rejection packing prevents the visible rows and repeated spacing of a grid.
@@ -419,7 +441,7 @@ async function start() {
     }
     ball(receptorArrays,[x,y-3.5,z],[.6,.48,.65],'#66b7ae',210);
   }
-  receptorArrays.build(proteins,4);
+  receptorArrays.buildChunked(proteins,4,1.2);
 
   // ATP synthase: the membrane c-ring and central stalk rotate (kind 5); the F1 head, a-subunit and peripheral stalk stay put (kind 4).
   const atpRotor=new Beads(true),atpStator=new Beads(true),atpSites=[[9.5,1.4],[-11.8,1.5],[15.5,-3],[5.2,1.6],[-1.6,1.4],[-16,1]].map(([x,z])=>[x,surf(x,z,1.715),z]);
@@ -448,7 +470,7 @@ async function start() {
       if(arc>nextNap){nextNap=arc+range(1.8,3.2);ball(naps,[cPt.x+nor.x*.14,cPt.y+nor.y*.14,cPt.z+nor.z*.14],[.13,.12,.13],random()<.5?'#f08a3c':'#e8743a',32,-1,origin);}
     }
   }
-  dna.build(proteins,11);naps.build(proteins,11);
+  dna.buildChunked(proteins,11,1);naps.buildChunked(proteins,11,1.5);
 
   // Polysomes: mRNA slides through a string of ribosomes while each one extrudes a growing protein chain.
   const ribosomes=new Beads(true),mrna=new Beads(),nascent=new Beads(),polyPath=(o,d,u)=>{const perp=new THREE.Vector3().crossVectors(d,up).normalize();return new THREE.Vector3(...o).addScaledVector(d,u).addScaledVector(perp,Math.sin(u*.9+o[0])*.5).add(new THREE.Vector3(0,.35*Math.sin(u*.6+o[2]),0));};
@@ -499,7 +521,7 @@ async function start() {
     const radii=[scale*range(.8,1.25),scale*range(.75,1.2),scale*range(.8,1.2)];
     ball(crowd,[x,y,z],radii,col,scale>.72?210:60,phase);
   }
-  const crowdMesh=crowd.build(proteins);
+  const crowdMesh=crowd.buildChunked(proteins,0,2.5);
   {
     const wall=[],wi=[],nx=60,ny=16;
     for(let j=0;j<=ny;j++)for(let i=0;i<=nx;i++){const x=-21+42*i/nx,top=surf(x,-11.6,.7),y=-14+(top+14)*j/ny;wall.push(x,y,-11.6);}
@@ -689,18 +711,8 @@ async function start() {
   }
   macroDNA.build(proteins,11);
   // Each whole-cell molecule is a down-sampled PDB surface (12-18 beads) placed by the Brownian simulation.
-  const macroRibosomes=new Beads(true),macroCrowd=new Beads();
-  function shapedMolecule(batch,index,radius,template,k,color,shift=[0,0,0]){
-    const atoms=templates[template].atoms,n=atoms.length/5,step=n/k,fill=Math.cbrt(n/k)*.82,q=new THREE.Quaternion().setFromEuler(new THREE.Euler(range(0,6.28),range(0,6.28),range(0,6.28))),v=new THREE.Vector3();
-    for(let j=0;j<k;j++){const a=Math.floor(j*step)*5;v.set(atoms[a],atoms[a+1],atoms[a+2]).applyQuaternion(q);batch.add([index,0,0],[shift[0]+v.x*radius*1.6,shift[1]+v.y*radius*1.6,shift[2]+v.z*radius*1.6],atoms[a+3]*radius*1.52*fill,color,-1,.66+.34*atoms[a+4]);}
-  }
-  const cellAllowed=(x,y,z,kind)=>z>-10&&z<5.5&&!inZSlot(y)&&!inSlab(x,y,z)&&(kind?innerRoom(x,y,z,1.4)&&!inNucleoid(x,y,z,.95):innerRoom(x,y,z,.6));
-  for(let i=0;i<3600;i++){const x=range(-36,36),y=range(-214,-10),z=range(-10,5.5);if(!cellAllowed(x,y,z,1))continue;
-    const id=brownian.add(x,y,z,.04,1),hue=['#9a4fb5','#b061c4','#8b45a8'][i%3];shapedMolecule(macroRibosomes,id,.95,3,18,hue);shapedMolecule(macroRibosomes,id,.62,2,12,'#d58bd8',[.8,.45,.2]);}
-  for(let i=0;i<150000&&brownian.count<62000;i++){const x=range(-36,36),y=range(-214,-10),z=range(-10,5.5);if(!cellAllowed(x,y,z,0)||(inNucleoid(x,y,z)&&random()<.7))continue;
-    const r=range(.42,.82),id=brownian.add(x,y,z,7.7*2.4/(r*12),0);shapedMolecule(macroCrowd,id,r,r>.68?2:random()<.55?0:1,r>.68?16:12,palette[Math.floor(random()*palette.length)]);}
-  simTexture.needsUpdate=true;metrics.simulatedMolecules=brownian.count;
-  macroRibosomes.build(proteins,24);macroCrowd.build(proteins,24);
+  /* Whole-cell molecules now stream from the proteome (see streamer below). */
+  const cellAllowed=null;
 
   // Division: the FtsZ ring treadmills around the pinched waist (kind 18); MinD oscillates between the poles (kind 19).
   const zRing=new Beads(),minD=new Beads();
@@ -727,6 +739,56 @@ async function start() {
     }
   }
   macroFlagella.build(motor,17);macroMotors.build(motor);
+
+  // ── Whole-cell streaming: real E. coli proteome, generated tile by tile in a worker as the camera needs it ──
+  const streamer=(()=>{
+    const TILE=12,NX=7,NY=19,X0=-42,Y0=-218,base=new THREE.InstancedBufferGeometry(),tiles=new Map(),inFlight=new Map();
+    base.setAttribute('position',new THREE.Float32BufferAttribute(new Float32Array(12),3));base.setAttribute('aMicroId',new THREE.Float32BufferAttribute([0,1,2,3],1));
+    const fineMat=beadMaterial(25,true),coarseMat=beadMaterial(25,false);
+    const worker=new Worker('./cellworker.js?v=11');let ready=false,proteome=null;
+    const frustum=new THREE.Frustum(),pm=new THREE.Matrix4(),box=new THREE.Box3(),stats={tiles:0,molecules:0,beads:0,requests:0};
+    fetch('./cell/proteome.json').then(r=>r.json()).then(p=>{proteome=p;worker.postMessage({type:'init',proteome:p});}).catch(e=>console.error('proteome',e));
+    worker.onmessage=({data})=>{
+      if(data.type==='ready'){ready=true;return;}
+      // The tile's bounding sphere follows from its key (column, row, detail level, cut position).
+      const [ti,tj,,tcut]=data.key.split(',').map(Number);data.tile=ti+','+tj;data.cx=X0+ti*TILE+TILE/2;data.cy=Y0+tj*TILE+TILE/2;data.cz=tcut/2-2;data.br=Math.hypot(TILE/2,TILE/2,2)+1.5;
+      const want=inFlight.get(data.tile);inFlight.delete(data.tile);
+      const geo=new THREE.InstancedBufferGeometry();geo.setAttribute('position',base.getAttribute('position'));geo.setAttribute('aMicroId',base.getAttribute('aMicroId'));
+      for(const [name,key,size] of [['aCenter','center',3],['aOffset','offset',3],['aRadius','radius',1],['aColor','color',3],['aSeed','seed',1],['aShade','shade',1],['aSpecies','species',1]])geo.setAttribute(name,new THREE.InstancedBufferAttribute(data.arrays[key],size));
+      geo.instanceCount=data.count;geo.setDrawRange(0,data.lod===0?4:1);
+      geo.boundingSphere=new THREE.Sphere(new THREE.Vector3(data.cx,data.cy,data.cz),data.br);
+      const mesh=new THREE.Points(geo,data.lod===0?fineMat:coarseMat);mesh.userData={streamed:true,key:data.key,molecules:data.molecules,beads:data.count};
+      const old=tiles.get(data.tile);if(old){proteins.remove(old.mesh);old.mesh.geometry.dispose();}
+      proteins.add(mesh);tiles.set(data.tile,{mesh,key:data.key});
+      if(want&&want!==data.key)request(data.tile,want);
+    };
+    function request(tile,key){
+      const [i,j,lod,cutB]=key.split(',').map(Number),x0=X0+i*TILE,y0=Y0+j*TILE,z1=cutB/2,z0=z1-5;
+      inFlight.set(tile,key);stats.requests++;
+      worker.postMessage({type:'tile',key,x0,x1:x0+TILE,y0,y1:y0+TILE,z0,z1,lod});
+    }
+    function update(){
+      if(!ready)return;
+      for(const t of tiles.values())t.mesh.visible=false;
+      if(!proteins.visible)return;
+      pm.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);frustum.setFromProjectionMatrix(pm);
+      const cutB=Math.round(cutUniform.value*2),want=[];
+      for(let i=0;i<NX;i++)for(let j=0;j<NY;j++){
+        const x0=X0+i*TILE,y0=Y0+j*TILE;
+        if(Math.abs(x0)<21.5&&Math.abs(x0+TILE)<21.5&&y0>-13.4)continue;
+        box.min.set(x0,y0,cutB/2-5);box.max.set(x0+TILE,y0+TILE,cutB/2);
+        if(!frustum.intersectsBox(box))continue;
+        const d=box.distanceToPoint(camera.position),lod=d<14?0:d<42?1:2,tile=i+','+j,key=[i,j,lod,cutB].join(',');
+        const have=tiles.get(tile);if(have)have.mesh.visible=true;
+        if(!have||have.key!==key)want.push([d,tile,key]);
+      }
+      want.sort((a,b)=>a[0]-b[0]);
+      for(const [,tile,key] of want){if(inFlight.size>=4)break;if(inFlight.has(tile)){inFlight.set(tile,key);continue;}request(tile,key);}
+      stats.tiles=0;stats.molecules=0;stats.beads=0;for(const t of tiles.values())if(t.mesh.visible){stats.tiles++;stats.molecules+=t.mesh.userData.molecules;stats.beads+=t.mesh.userData.beads;}
+      metrics.stream={...stats};
+    }
+    return {update,get proteome(){return proteome;}};
+  })();
 
   const macroSpecks=new Beads();
   for(let i=0;i<2600;i++)macroSpecks.add([range(-320,320),range(-420,420),range(-320,80)],[0,0,0],range(.03,.12),'#e7f2ee',range(0,120));
@@ -808,7 +870,21 @@ async function start() {
     envelope:{position:[9,13,32],target:[-2,3,-2],title:'A layered boundary',text:'Two membranes and a cell-wall layer form the envelope. The space between them contains a crowded collection of proteins.'},
     interior:{position:[3,3,22],target:[-5,-4,-1],title:'A crowded interior',text:'Proteins occupy a dense, three-dimensional landscape. Their gentle drift is illustrative; this is not an atom-level physics simulation.'}
   };
-  let transition=null,lodFar=false;
+  let transition=null,lodFar=false,dynScale=1,steadyFast=0;
+  // Sub-bead granules only where they can be seen: chunks within ~28 units of the camera.
+  const nearCamera=mesh=>{const s=mesh.geometry.boundingSphere;return camera.position.distanceTo(s.center)-s.radius<16;};
+  // Detail tiers for spatial chunks: granules up close, full atoms at mid range, a third of the atoms (slightly enlarged) far away.
+  function chunkTier(mesh){
+    if(state.quality==='low'||lodFar)return 2;
+    const s=mesh.geometry.boundingSphere,d=camera.position.distanceTo(s.center)-s.radius;
+    return d<16?0:d<34?1:2;
+  }
+  function applyTier(mesh){
+    const tier=chunkTier(mesh),fine=mesh.userData.detail&&tier===0,u=mesh.material.uniforms;
+    mesh.geometry.instanceCount=tier===2?Math.ceil(mesh.userData.fullCount/3):mesh.userData.fullCount;
+    mesh.geometry.setDrawRange(0,fine?4:1);u.uMicroDetail.value=fine?1:0;u.uRadiusScale.value=tier===2?1.32:1;
+    return fine;
+  }
   function setView(name,instant=false){
     state.view=name;const v=views[name];
     const aim=new THREE.Vector3(...v.target);if(innerWidth<=760&&name==='motor')aim.x+=1.1;
@@ -851,13 +927,13 @@ async function start() {
   document.addEventListener('keydown',e=>{if(/INPUT|SELECT|BUTTON|TEXTAREA/.test(e.target.tagName))return;if(e.code==='Space'){e.preventDefault();togglePlay();}if(e.key.toLowerCase()==='r'){stopTour();setView('motor');}if(e.key.toLowerCase()==='h')togglePanel();});
   function resize(){
     const bounds=$('viewport').getBoundingClientRect();heightUniform.value=bounds.height;
-    const scale={low:.65,balanced:1.15,high:1.45}[state.quality];
+    const scale={low:.65,balanced:1.15,high:1.45}[state.quality]*dynScale;metrics.dynScale=+dynScale.toFixed(2);
     renderer.setPixelRatio(Math.min(devicePixelRatio,1.5)*scale);renderer.setSize(bounds.width,bounds.height);camera.aspect=bounds.width/bounds.height;camera.fov=bounds.width<600?55:40;camera.updateProjectionMatrix();
-    const size=renderer.getDrawingBufferSize(new THREE.Vector2());target.setSize(size.x,size.y);postMaterial.uniforms.uSize.value.copy(size);
+    const size=renderer.getDrawingBufferSize(new THREE.Vector2());target.setSize(size.x,size.y);bufferHeightUniform.value=size.y;postMaterial.uniforms.uSize.value.copy(size);
     const tan=Math.tan(THREE.MathUtils.degToRad(camera.fov*.5));postMaterial.uniforms.uProj.value.set(tan*camera.aspect,tan);
     postMaterial.uniforms.uFx.value=state.quality==='low'?0:1;
     metrics.activeSphereCount=0;metrics.renderedSphereCount=0;
-    for(const mesh of beadMeshes){const thin=state.quality==='low'||(lodFar?!mesh.userData.macro:mesh.userData.macro),fine=mesh.userData.detail&&!thin;mesh.geometry.instanceCount=thin?Math.ceil(mesh.userData.fullCount/3):mesh.userData.fullCount;mesh.geometry.setDrawRange(0,fine?24:6);mesh.material.uniforms.uMicroDetail.value=fine?1:0;mesh.material.uniforms.uRadiusScale.value=state.quality==='low'?1.35:1;metrics.activeSphereCount+=mesh.geometry.instanceCount;metrics.renderedSphereCount+=mesh.geometry.instanceCount*(fine?4:1);}
+    for(const mesh of beadMeshes){if(mesh.userData.chunked){const fine=applyTier(mesh);metrics.activeSphereCount+=mesh.geometry.instanceCount;metrics.renderedSphereCount+=mesh.geometry.instanceCount*(fine?4:1);continue;}const thin=state.quality==='low'||(lodFar?!mesh.userData.macro:mesh.userData.macro),fine=mesh.userData.detail&&!thin;mesh.geometry.instanceCount=thin?Math.ceil(mesh.userData.fullCount/3):mesh.userData.fullCount;mesh.geometry.setDrawRange(0,fine?4:1);mesh.material.uniforms.uMicroDetail.value=fine?1:0;mesh.material.uniforms.uRadiusScale.value=state.quality==='low'?1.35:1;metrics.activeSphereCount+=mesh.geometry.instanceCount;metrics.renderedSphereCount+=mesh.geometry.instanceCount*(fine?4:1);}
   }
   $('quality').onchange=e=>{state.quality=e.target.value;resize();};window.addEventListener('resize',resize);resize();
   $('show-specks').onchange=e=>{suspension.visible=e.target.checked;};
@@ -879,7 +955,7 @@ async function start() {
     cring:axis(1.25,-1.05,1.82),stators:axis(Math.cos(stator)*2.78+.25,.05,Math.sin(stator)*2.78),statorstalk:axis(Math.cos(stator)*2.78,2.1,Math.sin(stator)*2.78),
     export:axis(.55,-3.65,.5),cargo:axis(3.3,-3,.8),protons:axis(2.78,1.2,0),chey:[-1.6,-1.6,1],
     outer:onSurf(-8,1.5,5.0),lps:onSurf(-10.5,1.2,5.1,1.1),porins:onSurf(frontPorin[0],frontPorin[1],5.05),wall:onSurf(-4,1.5,4.02),periplasm:onSurf(-6.5,1,3),
-    wholecell:[40.6,-128,0],bundle:[0,150,0],pili:[...pili].filter(t=>t[2]<1.5&&t[1]<-60&&t[1]>-150).sort((a,b)=>b[0]-a[0])[0]??pili[0],nucleoids:[7,-72,1],ribosomezone:[-27,-155,1],zring:[33,-105,0],min:[-30,-188,1],
+    wholecell:[40.6,-128,0],proteome:[-24,-60,1.5],bundle:[0,150,0],pili:[...pili].filter(t=>t[2]<1.5&&t[1]<-60&&t[1]>-150).sort((a,b)=>b[0]-a[0])[0]??pili[0],nucleoids:[7,-72,1],ribosomezone:[-27,-155,1],zring:[33,-105,0],min:[-30,-188,1],
     rnap:[rnapSites[0][0],rnapSites[0][1]+.7,rnapSites[0][2]],chaperonin:[chaperoninSites[0][0]+.6,chaperoninSites[0][1]+.3,chaperoninSites[0][2]+.5],eftu:[ribosomeSites[2][0],ribosomeSites[2][1]+1.6,ribosomeSites[2][2]],
     inner:onSurf(9,1.6,1.85),atpsynthase:[atpSites[3][0]+.35,atpSites[3][1]-1.25,atpSites[3][2]+.35],chemoreceptors:[treeSites[0][0]+.5,surf(treeSites[0][0],treeSites[0][1],1.6)-1.8,treeSites[0][1]+.4],respiratory:receptorSites[0].slice(0,3),
     ribosomes:ribosomeSites[1],mrna:polyPath(...polysomes[0],3.5).toArray(),nascent:ribosomeSites[4].map((v,i)=>v+[-.4,-.9,.5][i]),efflux:onSurf(effluxSites[0][0]+.35,effluxSites[0][1]+.3,3.4),drugs:onSurf(effluxSites[3][0],effluxSites[3][1],5.6),crowd:[-6,-6,1.6],dna:[-7.5,-5,-.6],metabolites:[-2.2,-3.2,1.7],specks:[-7,11,3]
@@ -911,6 +987,18 @@ async function start() {
       if(innerWidth<=760&&!document.body.classList.contains('panel-hidden'))togglePanel();
     }
   }
+  // A species card built from the proteome table (PaxDb abundance, UniProt annotation, AlphaFold shape).
+  function openSpecies(p,i){
+    const s=p.species[i],where={cyto:'cytoplasm',im:'inner membrane',om:'outer membrane',peri:'periplasm'}[s.comp];
+    state.selected=null;$('annot-kicker').textContent='Real E. coli protein · '+where+' · ~'+s.copies.toLocaleString()+' copies per cell';
+    $('annot-title').textContent=(s.gene||s.acc)+' · '+s.name;
+    $('annot-what').textContent=`${s.name} (${s.gene}) is ${s.len} amino acids and ${(s.mass/1000).toFixed(1)} kDa. PaxDb's integrated proteomics puts it at about ${s.copies.toLocaleString()} copies in a cell this size, and UniProt places it in the ${where}. A globular protein of this mass is roughly ${(s.r*20).toFixed(1)} nm across and diffuses at about ${s.D.toFixed(1)} µm²/s in cytoplasm.`;
+    $('annot-model').hidden=false;$('annot-model').textContent='In this model: '+(s.own?'its AlphaFold structure, coarse-grained to 48 beads up close and 12 farther away.':'the shape of a similar-sized protein; its own structure is not in the downloaded set.')+' Position is sampled by abundance; it jiggles in place at a rate set by its size.';
+    const list=$('annot-cites');list.textContent='';
+    for(const [text,url] of [['UniProt '+s.acc+' — '+s.name,'https://www.uniprot.org/uniprotkb/'+s.acc],['AlphaFold model AF-'+s.acc+'-F1','https://alphafold.ebi.ac.uk/entry/'+s.acc],[CITES.paxdb2015.text,CITES.paxdb2015.url],[CITES.erickson2009.text,CITES.erickson2009.url]]){const li=document.createElement('li'),a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noreferrer';a.textContent=text;li.append(a);list.append(li);}
+    card.hidden=false;document.body.classList.add('annot-open');
+  }
+  window.__micro.openSpecies=i=>streamer.proteome&&openSpecies(streamer.proteome,i);
   function closeEntry(){state.selected=null;card.hidden=true;document.body.classList.remove('annot-open');for(const b of document.querySelectorAll('[data-guide]'))b.setAttribute('aria-current','false');}
   $('annot-close').onclick=closeEntry;
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&state.selected)closeEntry();});
@@ -945,6 +1033,24 @@ async function start() {
   renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();fail(new Error('The graphics context was interrupted. Reload to rebuild the scene, or try Performance quality.'));});
   renderer.domElement.addEventListener('webglcontextrestored',()=>location.reload());
   const slabCenter=new THREE.Vector3(0,-4,-4);
+  // Click-to-identify: re-render the pixel under the pointer with species ids instead of colours.
+  const pickTarget=new THREE.WebGLRenderTarget(1,1),pickPixel=new Uint8Array(4);
+  function pickAt(clientX,clientY){
+    const rect=renderer.domElement.getBoundingClientRect(),hidden=[];
+    scene.traverse(o=>{if(o.isMesh&&o.visible&&!(o.material&&o.material.uniforms&&o.material.uniforms.uPick)){o.visible=false;hidden.push(o);}});
+    const background=scene.background;scene.background=null;pickUniform.value=1;const bufferHeight=bufferHeightUniform.value;bufferHeightUniform.value=1;camera.setViewOffset(rect.width,rect.height,clientX-rect.left,clientY-rect.top,1,1);
+    renderer.setRenderTarget(pickTarget);renderer.setClearColor(0x000000,1);renderer.clear();renderer.render(scene,camera);renderer.readRenderTargetPixels(pickTarget,0,0,1,1,pickPixel);renderer.setRenderTarget(null);
+    camera.clearViewOffset();pickUniform.value=0;bufferHeightUniform.value=bufferHeight;scene.background=background;renderer.setClearColor(0x000000,0);for(const o of hidden)o.visible=true;
+    return pickPixel[0]+pickPixel[1]*256;
+  }
+  let downAt=null;
+  renderer.domElement.addEventListener('pointerdown',e=>{downAt=[e.clientX,e.clientY,performance.now()];});
+  renderer.domElement.addEventListener('pointerup',e=>{
+    if(!downAt||Math.hypot(e.clientX-downAt[0],e.clientY-downAt[1])>5||performance.now()-downAt[2]>450)return;
+    const id=pickAt(e.clientX,e.clientY);if(!id)return;
+    if(id===65001){openEntry('ribosomezone',false);return;}
+    const p=streamer.proteome;if(p&&p.species[id-1])openSpecies(p,id-1);
+  });
   let last=performance.now(),sample=last,frameCount=0,angle=0,omega=1.65,nextSwitch=12,tumbleUntil=-1,tumbleStart=0,holdClock=0,interacting=false,lastInteraction=performance.now(),idleClock=0;
   controls.addEventListener('start',()=>{interacting=true;holdClock=0;});controls.addEventListener('end',()=>{interacting=false;lastInteraction=performance.now();});
   function setTumble(on){
@@ -966,8 +1072,7 @@ async function start() {
       if(state.autoSwitch&&state.time>12){if(tumbleUntil<0&&chemo.wantsCW(simDt))setTumble(true);else if(tumbleUntil>0&&state.time-tumbleStart>.8&&chemo.wantsCCW(simDt))setTumble(false);}
       // Min reaction-diffusion runs 3.5x faster than display time (model period ~104 s, seen as ~30 s).
       minSim.advance(simDt*3.5);
-      {const row=255*256*4,dm=Math.max(...minSim.d),em=Math.max(...minSim.e);for(let b=0;b<100;b++){brownian.data[row+b*4]=minSim.d[b]/dm;brownian.data[row+b*4+1]=minSim.e[b]/em;}}
-      if(proteins.visible)brownian.step(simDt,cellAllowed);
+      {const dm=Math.max(...minSim.d),em=Math.max(...minSim.e);for(let b=0;b<100;b++){minData[b*4]=minSim.d[b]/dm;minData[b*4+1]=minSim.e[b]/em;}}
       simTexture.needsUpdate=true;
       const targetOmega=1.65*state.direction*(tumbleUntil>0?-1:1);omega+=(targetOmega-omega)*Math.min(1,simDt*8);angle+=omega*simDt;
       if(state.tour){tourElapsed+=dt;if(pendingTourEntry&&!transition){const stop=pendingTourEntry;pendingTourEntry=null;openEntry(stop.entry,!stop.view,true);}if(tourElapsed>11){tourElapsed=0;tourIndex=(tourIndex+1)%tourStops.length;goTourStop(tourIndex);}}
@@ -992,6 +1097,7 @@ async function start() {
     }
     controls.update();const focus=camera.position.distanceTo(controls.target);postMaterial.uniforms.uFocus.value=focus;fogUniform.value.set(focus*1.4+12,focus*3.6+46);
     const far=camera.position.distanceTo(slabCenter)>150;if(far!==lodFar){lodFar=far;resize();}
+    if(metrics.frames%9===0){streamer.update();for(const mesh of beadMeshes)if(mesh.userData.chunked)applyTier(mesh);}
     if(metrics.frames%6===0){
       const perPx=2*focus*Math.tan(THREE.MathUtils.degToRad(camera.fov/2))/Math.max($('viewport').clientHeight,1)*10,nice=[5,10,20,50,100,200,500,1000,2000,5000].filter(n=>n/perPx<=130).pop()??5;
       $('scale-line').style.width=(nice/perPx).toFixed(1)+'px';$('scale-text').textContent=nice>=1000?nice/1000+' µm':nice+' nm';
@@ -1001,7 +1107,9 @@ async function start() {
     sound.update({distance:camera.position.distanceTo(controls.target),motorDistance:camera.position.distanceTo(motorSource),motorPan:soundProjection.x,proteinDistance:camera.position.distanceTo(proteinSource),paused:state.paused,hidden:document.hidden,speed:state.speed,direction:Math.sign(omega)||state.direction,motorVisible:motor.visible&&soundProjection.z<1&&soundProjection.z>-1,proteinsVisible:proteins.visible,particlesVisible:particles.visible,time:state.time});
     renderer.setRenderTarget(target);renderer.render(scene,camera);metrics.drawCalls=renderer.info.render.calls;renderer.setRenderTarget(null);renderer.render(postScene,postCamera);labels();
     frameCount++;metrics.frames++;
-    if(now-sample>1000){metrics.fps=Math.round(frameCount*1000/(now-sample));$('fps').textContent=metrics.fps+' FPS';frameCount=0;sample=now;const seconds=Math.floor(state.time);$('clock').textContent=String(Math.floor(seconds/60)).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0');}
+    if(now-sample>1000){metrics.fps=Math.round(frameCount*1000/(now-sample));
+      // Adaptive resolution: trade pixels for frame rate while the scene is running, and win them back when steady.
+      if(state.adaptive&&running){if(metrics.fps<55&&dynScale>.5){dynScale=Math.max(.5,dynScale*.86);steadyFast=0;resize();}else if(metrics.fps>=59&&dynScale<1&&++steadyFast>=3){dynScale=Math.min(1,dynScale*1.08);steadyFast=0;resize();}}$('fps').textContent=metrics.fps+' FPS';frameCount=0;sample=now;const seconds=Math.floor(state.time);$('clock').textContent=String(Math.floor(seconds/60)).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0');}
     if(!metrics.ready){metrics.ready=true;$('loading').classList.add('hidden');$('render-status').textContent='MOLECULAR LANDSCAPE';}
   }
   function tEase(t){return t*(3-2*t);}
@@ -1036,5 +1144,6 @@ async function start() {
   setInterval(drawCharts,125);
   renderer.setAnimationLoop(frame);
   window.__micro.setView=setView;
+  window.__micro.flyTo=(target,dist)=>{const t=new THREE.Vector3(...target),dir=new THREE.Vector3(.32,.24,1).normalize();transition={from:camera.position.clone(),targetFrom:controls.target.clone(),to:t.clone().addScaledVector(dir,dist),targetTo:t,t:0};};
   window.__micro.renderer=renderer;
 }

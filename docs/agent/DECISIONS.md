@@ -63,3 +63,16 @@
 - Camera flights now use a slerped direction, log-distance with an arc, smootherstep easing, and a duration set by scale change and travel. Entry flights bias toward the open side of the cut. Tour holds add an eased slow orbit and dolly; each stop lasts 11 s.
 - Live charts in the panel show the Min membrane profiles and the CheY-P trace with tumble bands. Their palette was validated with the dataviz validator against #0b1519.
 - Fixed a pre-existing negative frame delta on the first animation frame, which turned the new noise terms into NaN.
+
+2026-10-17: Revision 10 (real proteome, streaming, 60 fps).
+- Organism: E. coli K-12 MG1655, the bacterium with the most data and the closest match to the model (Gram-negative, peritrichous flagella).
+- Proteome: `scripts/build-proteome.py` joins PaxDb integrated abundances (by b-number) to UniProt reviewed entries. The compartment is the first UniProt location named. Ribosomal proteins are folded into a ribosome count (the median of S-protein copies, 9,482). The top 700 species (89.3% of molecules) are coarse-grained from AlphaFold v6 models. Sizes come from Erickson's Rmin, and diffusion is scaled from GFP using the same formula. The output is `dist/cell/proteome.json` (about 2 MB). The CPU Brownian layer was removed.
+- Streaming: `cellworker.js` places ribosomes (excluded from nucleoids), cytoplasmic proteins on a jittered grid, and inner-membrane, outer-membrane and periplasm proteins in each 12×12 tile within the 5-unit layer behind the cut. Placement is deterministic per tile. Molecules are drawn at hydrated size (1.25× Rmin). The main thread keeps at most 4 requests in flight, nearest first, and keeps the old level of detail visible until its replacement arrives.
+- Performance:
+  - Beads are point sprites, so a bead or granule is one vertex.
+  - The heaviest batches are chunked into 10-unit cells with bounding spheres, so three.js frustum culls them.
+  - Chunk tiers by distance: under 16 units, granules; under 34, full atoms; beyond, a third of the atoms enlarged 1.32×.
+  - Adaptive resolution runs while playing, with `state.adaptive`; tests disable it.
+  - The fragment shader no longer computes a per-fragment matrix inverse and shares its trig terms.
+  - Measured headless at 1440×960: motor 62 fps, envelope 82, interior 61–67, cell about 145–165, and about 90 zoomed into the whole-cell layer.
+- Picking: a 1-pixel re-render with species ids (background removed, point sizes rescaled) opens a card built from the proteome table.

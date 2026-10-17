@@ -7,7 +7,7 @@
   <meta name="description" content="Explore a living molecular landscape. An interactive bacterial cutaway with a rotating flagellar motor, layered membranes, and drifting proteins.">
   <title>Micro — Molecular Lab</title>
   <link rel="icon" type="image/svg+xml" href="./favicon.svg">
-  <link rel="stylesheet" href="./style.css?v=9">
+  <link rel="stylesheet" href="./style.css?v=11">
   <script type="importmap">{"imports":{"three":"./vendor/three.module.js"}}</script>
 </head>
 <body class="panel-hidden">
@@ -33,11 +33,11 @@
         <figure class="chart"><figcaption><strong>Min proteins on the membrane</strong><span class="legend"><i style="--c:#1a9ccc"></i>MinD<i style="--c:#d9507f"></i>MinE</span></figcaption><canvas id="chart-min" role="img" aria-label="Membrane MinD and MinE along the cell, each relative to its peak, updating live"></canvas><div class="chart-axis"><span>top pole</span><span>midcell</span><span>bottom pole</span></div></figure>
         <figure class="chart"><figcaption><strong>CheY-P and motor switching</strong><span class="legend"><i style="--c:#5aa821"></i>CheY-P<i class="band"></i>tumble</span></figcaption><canvas id="chart-chey" role="img" aria-label="CheY-P concentration over the last 60 seconds, with tumble intervals shaded"></canvas><div class="chart-axis"><span>60 s ago</span><span>now</span></div></figure>
         <p id="chart-tip" class="chart-tip" aria-live="polite">Hover a chart to read values.</p>
-        <p class="sim-note">Running live: the Min reaction–diffusion model of Howard et al. (2001) with its published parameters; motor switching from CheY-P through the Hill curve measured by Cluzel et al. (2000); Brownian motion of every whole-cell molecule using measured diffusion coefficients, slowed about two-million-fold.</p></div>
+        <p class="sim-note">Running live: the Min reaction–diffusion model of Howard et al. (2001) with its published parameters; motor switching from CheY-P through the Hill curve measured by Cluzel et al. (2000); and the whole-cell layer streams the measured E. coli proteome (PaxDb, UniProt, AlphaFold) tile by tile around the camera.</p></div>
       <div class="control-section compact"><div class="section-title"><span>07</span> BY THE NUMBERS</div><ul id="facts" class="facts"></ul></div>
       <div id="info-card"><div class="info-heading"><span class="info-dot"></span><strong id="info-title">The flagellar motor</strong></div><p id="info-text">A rotary machine spanning the cell envelope. The rotor turns the shaft and external filament while its supports stay anchored.</p><span class="info-note">ILLUSTRATIVE MODEL · MOTION SLOWED</span></div>
       <button id="reset" class="reset-button">↺ <span>Reset view</span><kbd>R</kbd></button>
-      <details class="model-notes"><summary>About this model</summary><p>A visual interpretation of a bacterial cutaway. Molecular shapes use transformed surface atoms from representative PDB structures; these are shape references, not an inventory of bacterial proteins. Motor geometry, scale, pathways, and speed are schematic. Each labeled structure in the Field guide lists its own sources.</p><p>Shape data: RCSB PDB <a href="https://www.rcsb.org/structure/1LYZ" target="_blank" rel="noreferrer">1LYZ</a>, <a href="https://www.rcsb.org/structure/1UBQ" target="_blank" rel="noreferrer">1UBQ</a>, <a href="https://www.rcsb.org/structure/1ATP" target="_blank" rel="noreferrer">1ATP</a>, <a href="https://www.rcsb.org/structure/1GZX" target="_blank" rel="noreferrer">1GZX</a>.</p></details>
+      <details class="model-notes"><summary>About this model</summary><p>A visual interpretation of a bacterial cutaway. Molecular shapes use transformed surface atoms from representative PDB structures; these are shape references, not an inventory of bacterial proteins. Motor geometry, scale, pathways, and speed are schematic. Each labeled structure in the Field guide lists its own sources.</p><p>Whole-cell proteome: copy numbers from PaxDb (integrated E. coli K-12 MG1655 whole-organism dataset), compartments and names from <a href="https://www.uniprot.org/proteomes/UP000000625" target="_blank" rel="noreferrer">UniProt UP000000625</a>, and shapes coarse-grained from <a href="https://alphafold.ebi.ac.uk" target="_blank" rel="noreferrer">AlphaFold DB</a> models (CC BY 4.0). Click any molecule in the whole cell to identify it.</p><p>Shape data: RCSB PDB <a href="https://www.rcsb.org/structure/1LYZ" target="_blank" rel="noreferrer">1LYZ</a>, <a href="https://www.rcsb.org/structure/1UBQ" target="_blank" rel="noreferrer">1UBQ</a>, <a href="https://www.rcsb.org/structure/1ATP" target="_blank" rel="noreferrer">1ATP</a>, <a href="https://www.rcsb.org/structure/1GZX" target="_blank" rel="noreferrer">1GZX</a>.</p></details>
     </aside>
     <div id="labels"></div>
     <div id="scale-bar" class="scale-bar" aria-hidden="true"><i id="scale-line"></i><span id="scale-text">50 nm</span></div>
@@ -47,6 +47,6 @@
     <div id="loading"><div class="loading-mark">μ</div><p>Assembling a small world<span>…</span></p></div>
     <div id="error" hidden><h2>This world needs WebGL 2</h2><p id="error-message">Try a browser with hardware acceleration enabled.</p><button onclick="location.reload()">Try again</button></div>
   </main>
-  <script type="module" src="./app.js?v=9"></script>
+  <script type="module" src="./app.js?v=11"></script>
 </body>
 </html>

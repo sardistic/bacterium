@@ -50,6 +50,10 @@ export const CITES = {
   howard2001: { text: 'Howard M, Rutenberg AD, de Vet S. Dynamic compartmentalization of bacteria: accurate division in E. coli. Phys Rev Lett. 2001;87:278102.', url: doi('10.1103/PhysRevLett.87.278102') },
   cluzel2000: { text: 'Cluzel P, Surette M, Leibler S. An ultrasensitive bacterial motor revealed by monitoring signaling proteins in single cells. Science. 2000;287:1652–1655.', url: doi('10.1126/science.287.5458.1652') },
   elowitz1999: { text: 'Elowitz MB, et al. Protein mobility in the cytoplasm of Escherichia coli. J Bacteriol. 1999;181:197–203.', url: doi('10.1128/JB.181.1.197-203.1999') },
+  paxdb2015: { text: 'Wang M, et al. Version 4.0 of PaxDb: protein abundance data, integrated across model organisms, tissues, and cell-lines. Proteomics. 2015;15:3163–3168.', url: doi('10.1002/pmic.201400441') },
+  uniprot2023: { text: 'The UniProt Consortium. UniProt: the Universal Protein Knowledgebase in 2023. Nucleic Acids Res. 2023;51:D523–D531.', url: doi('10.1093/nar/gkac1052') },
+  varadi2022: { text: 'Varadi M, et al. AlphaFold Protein Structure Database: massively expanding the structural coverage of protein-sequence space. Nucleic Acids Res. 2022;50:D439–D444.', url: doi('10.1093/nar/gkab1061') },
+  erickson2009: { text: 'Erickson HP. Size and shape of protein molecules at the nanometer level determined by sedimentation, gel filtration, and electron microscopy. Biol Proced Online. 2009;11:32–51.', url: doi('10.1007/s12575-009-9008-x') },
   milo2010: { text: 'Milo R, et al. BioNumbers—the database of key numbers in molecular and cell biology. Nucleic Acids Res. 2010;38:D750–D753.', url: doi('10.1093/nar/gkp889') }
 };
 
@@ -69,8 +73,12 @@ export const FACTS = [
 export const ENTRIES = [
   { id: 'wholecell', group: 'cell', layer: 'envelope', scale: 'cell', name: 'The whole cell', kicker: 'E. coli-like rod · ~2.2 µm × 0.8 µm', dist: 560,
     what: 'Most E. coli cells are rods 1–3 µm long and under 1 µm wide. They grow in length and divide in the middle, so a cell roughly doubles its size before splitting in two.',
-    model: 'Drawn at true scale, about 10 nm per unit. The window at the top pole is the detailed region. Elsewhere, about 60,000 molecules are each drawn from a down-sampled protein structure and move by simulated Brownian motion. Their diffusion coefficients scale from the measured value for GFP (about 7.7 µm²/s), slowed about two-million-fold so the motion is visible. Crowding enters through these measured rates; molecules do not collide.',
+    model: 'Drawn at true scale, about 10 nm per unit. The window at the top pole is the detailed region. Elsewhere, the molecules are the real E. coli proteome streamed in tiles (see The real proteome). Each jiggles in place at a rate scaled from its size and the measured diffusion of GFP (about 7.7 µm²/s), slowed so the motion is visible.',
     cites: ['taheri2015', 'silhavy2010', 'elowitz1999'] },
+  { id: 'proteome', group: 'cell', layer: 'proteins', scale: 'cell', name: 'The real proteome', kicker: 'E. coli K-12 MG1655 · click any molecule', dist: 120,
+    what: 'Every protein in the whole-cell layer is a real E. coli K-12 protein, placed in its measured compartment at its measured abundance. Ribosome numbers come from the ribosomal-protein counts. Click any molecule to see which protein it is.',
+    model: 'Copy numbers come from PaxDb’s integrated whole-organism dataset, scaled to about 3 million proteins per µm³. Compartments come from UniProt. The most abundant species use their own AlphaFold structures, coarse-grained to 48 and 12 beads, which covers most molecules in the cell; rarer ones borrow a similar-sized shape. Tiles stream in around the camera from a background worker, with detail rising as you get closer. Positions are sampled from the abundances, not taken from imaging.',
+    cites: ['paxdb2015', 'uniprot2023', 'varadi2022', 'erickson2009', 'milo2013'] },
   { id: 'bundle', group: 'cell', layer: 'motor', scale: 'cell', name: 'Flagellar bundle', kicker: 'several flagella turning together', dist: 300,
     what: 'An E. coli cell has several flagella spread over its surface. When their motors turn counterclockwise, the filaments wrap into one bundle that trails behind and drives the cell forward: a run. When motors switch clockwise, those filaments change shape and fly out of the bundle, and the cell tumbles to a new heading.',
     model: 'Six flagella wrap over the pole into a rotating helical bundle that splays apart during each tumble (watch the status pill). Real filaments are 5–10 µm long, longer than shown.',
@@ -85,7 +93,7 @@ export const ENTRIES = [
     cites: ['nielsen2006', 'dillon2010'] },
   { id: 'ribosomezone', group: 'cell', layer: 'proteins', scale: 'cell', name: 'Ribosome-rich cytoplasm', kicker: 'ribosomes gather outside the nucleoids', dist: 150,
     what: 'Ribosomes are largely kept out of the dense nucleoids, so they collect toward the poles, the midcell and the membrane, where most translation happens.',
-    model: 'Each purple-and-pink pair is one 70S ribosome at true size. They diffuse at about 0.04 µm²/s, the slow rate measured for ribosomes engaged in translation, and the simulation keeps them out of the nucleoids.',
+    model: 'Each purple-and-pink pair is one 70S ribosome at true size. Their count comes from the measured ribosomal-protein abundance. They are kept out of the nucleoids and jiggle slowly, as translating ribosomes (about 0.04 µm²/s) do.',
     cites: ['bakshi2012'] },
   { id: 'zring', group: 'cell', layer: 'proteins', scale: 'cell', name: 'Z ring (FtsZ)', kicker: 'division ring · treadmilling filaments', dist: 150,
     what: 'FtsZ, a bacterial relative of tubulin, assembles a ring of short filaments at midcell under the inner membrane. The filaments treadmill around the ring, and that motion guides the enzymes that build the new cell wall of the dividing septum.',

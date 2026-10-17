@@ -20,6 +20,24 @@ The fullscreen viewer starts with controls closed. Open Controls for layer and p
 
 The Cell view zooms out to the whole bacterium at true scale: an E. coli-like rod about 2.2 µm long, cut open mid-division. It shows its flagellar bundle (which splays apart when the cell tumbles), pili, two separating chromosomes, ribosome-rich cytoplasm, a treadmilling FtsZ division ring and pole-to-pole Min oscillation. The detailed molecular window sits at its top pole.
 
+Whole-cell proteome (revision 10). The whole cell is built from measured E. coli K-12 MG1655 data:
+- **Copy numbers:** PaxDb's integrated whole-organism abundances, scaled to about 3 million proteins per µm³ (1.86M proteins and 9,482 ribosomes in this cell).
+- **Compartments and names:** UniProt UP000000625.
+- **Shapes:** AlphaFold DB models of the 700 most abundant species, which make up 89% of all molecules. Each is coarse-grained to 48 and 12 beads by k-means on confident Cα atoms; rarer species borrow a similar-sized shape.
+
+`python scripts/build-proteome.py <cache-dir>` regenerates `dist/cell/proteome.json`. The downloads are cached outside the repo, and the script reuses one HTTPS connection per host.
+
+At runtime, `dist/cellworker.js` generates 12×12-unit tiles of molecules in the layer behind the cutaway, deterministically and only for tiles in view. Detail depends on camera distance: 48-bead shapes up close, 12-bead at mid range, single beads far away. Click a molecule to identify it.
+
+Rendering holds 60 fps through several techniques:
+- point-sprite impostors (one vertex per bead);
+- spatially chunked bead batches with frustum culling;
+- per-chunk distance tiers;
+- level of detail between the window and the whole cell;
+- adaptive resolution while running.
+
+AlphaFold models are CC BY 4.0, and UniProt is CC BY 4.0; both are attributed in the app.
+
 Every structure carries an annotation pin. Select a pin, or pick a structure in Controls → Field guide, to see what it does, how this model simplifies it, and its literature sources (DOI links checked against Crossref, defined in dist/annotations.js). The flagellar filament places flagellin subunits on the measured one-start helix and rotates as a supercoiled helix with the motor. The hook is a woven, flared sleeve, and the stators are spinning MotA pentamers.
 
 Revision 6 adds film-style lighting: motion blur on spinning parts, depth of field, ambient occlusion, contact shadows and a color grade. Performance quality turns the extras off. The scene now shows live processes. The motor switches between runs and tumbles when CheY-P docks (the status pill at the top reports each switch, and Controls can turn it off). Ribosomes translate mRNA into growing protein chains, ATP synthase rotors spin, and efflux pumps expel drugs. The envelope shows bilayer tails, a woven cell wall, dense LPS and a periplasmic proton pool.

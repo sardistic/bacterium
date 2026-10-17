@@ -1,4 +1,5 @@
 // Live models that drive the whole-cell layer. Each one is a published model or measurement, run in slowed time.
+// (Whole-cell molecule motion runs on the GPU from the streamed proteome; see cellworker.js.)
 
 // Fast deterministic PRNG and an approximately normal sample (sum of four uniforms, unit variance).
 let rngState = 0x9e3779b9;
@@ -49,31 +50,4 @@ export class ChemotaxisSim {
   // Two-state switching whose stationary CW fraction equals the Hill bias.
   wantsCW(dt) { const b = Math.min(this.bias, .95); return uniform() < b / (1 - b) * this.cwExit * dt; }
   wantsCCW(dt) { return uniform() < this.cwExit * dt; }
-}
-
-// Brownian dynamics of the whole-cell molecules. Positions live in a float texture read by the bead shader.
-// Diffusion coefficients come from measurements (GFP ≈ 7.7 µm²/s, Elowitz et al. 1999, scaled by size via
-// Stokes-Einstein; translating ribosomes ≈ 0.04 µm²/s, Bakshi et al. 2012), slowed by `slow` for viewing.
-export class BrownianSim {
-  constructor(capacity, width = 256) {
-    this.width = width; this.count = 0; this.data = new Float32Array(width * width * 4);
-    this.dispUnits = new Float32Array(capacity); this.rot = new Float32Array(capacity); this.kind = new Uint8Array(capacity);
-    this.slow = 2e-6;
-  }
-  // diffusion in µm²/s; 1 scene unit = 10 nm, so µm²/s × 1e4 = units²/s.
-  add(x, y, z, diffusion, kind) {
-    const i = this.count++, o = i * 4;
-    this.data[o] = x; this.data[o + 1] = y; this.data[o + 2] = z; this.data[o + 3] = uniform() * 6.283;
-    this.dispUnits[i] = diffusion * 1e4 * this.slow; this.rot[i] = kind ? .01 : .12; this.kind[i] = kind;
-    return i;
-  }
-  step(dt, allowed) {
-    const { data, dispUnits, rot, kind } = this;
-    for (let i = 0; i < this.count; i++) {
-      const o = i * 4, s = Math.sqrt(2 * dispUnits[i] * dt);
-      const x = data[o] + s * gauss(), y = data[o + 1] + s * gauss(), z = data[o + 2] + s * gauss();
-      if (allowed(x, y, z, kind[i])) { data[o] = x; data[o + 1] = y; data[o + 2] = z; }
-      data[o + 3] += Math.sqrt(2 * rot[i] * dt) * gauss();
-    }
-  }
 }
